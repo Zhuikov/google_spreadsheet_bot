@@ -24,6 +24,7 @@ class TableStyle:
         self.fields.append(self.first_last_name)
         with open(file_name) as input:
             self.fields += (input.read().splitlines())
+            input.close()
         if self.test in self.fields:
             self.fields = [v for v in self.fields if v != self.test]
             self.fields.append(self.test_field)

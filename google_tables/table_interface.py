@@ -1,4 +1,5 @@
 import pygsheets
+import apiclient.discovery
 import google_tables as gt
 
 
@@ -6,14 +7,15 @@ class TableInterface:
 
     def __init__(self, credentials_file):
         self.client = pygsheets.authorize(credentials_file)
+        self.drive_service = apiclient.discovery.build("drive", "v3", )
 
     # table_style_file -- path to style file
     # group_list_file -- path to group list file
-    def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder, worksheet_title,
-                           table_style_file, group_list_file):
-        style = gt.TableStyle(table_style_file)
-        with open(group_list_file) as input:
+    def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder, worksheet_title):
+        style = gt.TableStyle("temp_files/temp_table_style")
+        with open("temp_files/temp_group_list") as input:
             lines = input.read().splitlines()
+            input.close()
         spreadsheet_template = {
             "properties": {
                 "title": spreadsheet_title,
@@ -31,7 +33,7 @@ class TableInterface:
         }
 
         # init table fields and students' names
-        spreadsheet = self.client.create(spreadsheet_title, spreadsheet_template, spreadsheet_folder)
+        spreadsheet = self.client.create(spreadsheet_title, spreadsheet_template, "")
         spreadsheet.sheet1.update_row(1, [style.fields])
         spreadsheet.sheet1.update_col(1, [lines], row_offset=1)
 
@@ -50,5 +52,4 @@ class TableInterface:
             include_tailing_empty_rows=True)
         main_field.apply_format(gt.CellStyle.main_table_cell)
 
-        # TODO: remove it
-        return spreadsheet.sheet1
+        return spreadsheet.url
