@@ -7,7 +7,7 @@ class TableInterface:
 
     def __init__(self, credentials_file):
         self.client = pygsheets.authorize(credentials_file)
-        self.drive_service = apiclient.discovery.build("drive", "v3", )
+        # self.drive_service = apiclient.discovery.build("drive", "v3", )
 
     # table_style_file -- path to style file
     # group_list_file -- path to group list file
