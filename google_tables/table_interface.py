@@ -1,13 +1,13 @@
 import pygsheets
-import apiclient.discovery
 import google_tables as gt
+
+from pprint import pprint
 
 
 class TableInterface:
 
-    def __init__(self, credentials_file):
-        self.client = pygsheets.authorize(credentials_file)
-        # self.drive_service = apiclient.discovery.build("drive", "v3", )
+    def __init__(self, credentials_sheets):
+        self.client = pygsheets.authorize(credentials_sheets)
 
     # table_style_file -- path to style file
     # group_list_file -- path to group list file
@@ -33,23 +33,27 @@ class TableInterface:
         }
 
         # init table fields and students' names
-        spreadsheet = self.client.create(spreadsheet_title, spreadsheet_template, "")
-        spreadsheet.sheet1.update_row(1, [style.fields])
-        spreadsheet.sheet1.update_col(1, [lines], row_offset=1)
+        # TODO: use DriveAPI
+        # spreadsheet = self.client.create(spreadsheet_title, spreadsheet_template)
+        # spreadsheet.sheet1.update_row(1, [style.fields])
+        # spreadsheet.sheet1.update_col(1, [lines], row_offset=1)
 
-        # format students' names column
-        first_col = spreadsheet.sheet1.get_col(1, returnas='range')
-        first_col.apply_format(gt.CellStyle.student_names_format_cell)
-        spreadsheet.sheet1.adjust_column_width(0)
+        # self.client.open_by_key("1wweVJX0tDh17C-ZrdehShAUXHJqtUlLbQ-uDm7jo7R0").delete()
+        pprint(self.client.drive.list())
+        #
+        # # format students' names column
+        # first_col = spreadsheet.sheet1.get_col(1, returnas='range')
+        # first_col.apply_format(gt.CellStyle.student_names_format_cell)
+        # spreadsheet.sheet1.adjust_column_width(0)
+        #
+        # # format table fields
+        # first_row = spreadsheet.sheet1.get_row(1, returnas='range')
+        # first_row.apply_format(gt.CellStyle.fields_format_cell)
+        #
+        # # set format of main table (with marks)
+        # main_field = spreadsheet.sheet1.get_values(
+        #     (2, 2), (spreadsheet.sheet1.rows, spreadsheet.sheet1.cols), returnas='range',
+        #     include_tailing_empty_rows=True)
+        # main_field.apply_format(gt.CellStyle.main_table_cell)
 
-        # format table fields
-        first_row = spreadsheet.sheet1.get_row(1, returnas='range')
-        first_row.apply_format(gt.CellStyle.fields_format_cell)
-
-        # set format of main table (with marks)
-        main_field = spreadsheet.sheet1.get_values(
-            (2, 2), (spreadsheet.sheet1.rows, spreadsheet.sheet1.cols), returnas='range',
-            include_tailing_empty_rows=True)
-        main_field.apply_format(gt.CellStyle.main_table_cell)
-
-        return spreadsheet.url
+        # return spreadsheet.url

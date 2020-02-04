@@ -9,7 +9,7 @@ from tg_bot import bot_config as config
 Init Google spreadsheet Table Interface
 """
 
-tables_api = TableInterface("client_secret.json")
+tables_api = TableInterface("botsCreds.json")
 
 """
 Bot's code
