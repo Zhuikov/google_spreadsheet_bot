@@ -26,7 +26,7 @@ class TableInterface:
 
     # table_style_file -- path to style file
     # group_list_file -- path to group list file
-    def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder, worksheet_title):
+    def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder_title, worksheet_title):
         style = gt.TableStyle("temp_files/temp_table_style")
         with open("temp_files/temp_group_list") as input:
             lines = input.read().splitlines()
@@ -47,21 +47,17 @@ class TableInterface:
             }]
         }
 
-        # # init table fields and students' names
-        # spreadsheet = self.client.create(spreadsheet_title, spreadsheet_template, "1rIhyXRdy77AKFLvWJqoyGsDAmD-6JZVH")
-        # spreadsheet.sheet1.update_row(1, [style.fields])
-        # spreadsheet.sheet1.update_col(1, [lines], row_offset=1)
+        spreadsheet_folder_id = self.__get_folder_id(spreadsheet_folder_title)
+
+        # init table fields and students' names
+        spreadsheet = self.client.create(spreadsheet_title, spreadsheet_template, spreadsheet_folder_id)
+        spreadsheet.sheet1.update_row(1, [style.fields])
+        spreadsheet.sheet1.update_col(1, [lines], row_offset=1)
 
         # self.client.open_by_key("1wweVJX0tDh17C-ZrdehShAUXHJqtUlLbQ-uDm7jo7R0").delete()
         # folder = self.drive.CreateFile({"title": "my_folder", "mimeType": "application/vnd.google-apps.folder"})
         # folder.Upload()
-        # pprint(self.client.drive.list(fields="files(name,id)"))
-        list = self.drive.ListFile({}).GetList()
-        for file in list:
-            pprint(file["title"])
-            pprint(file["id"])
-            pprint(file["parents"])
-            print()
+        pprint(self.client.drive.list(fields="files(name,id,parents)"))
 
         # # format students' names column
         # first_col = spreadsheet.sheet1.get_col(1, returnas='range')
@@ -79,3 +75,22 @@ class TableInterface:
         # main_field.apply_format(gt.CellStyle.main_table_cell)
 
         # return spreadsheet.url
+
+    def __get_folder_id(self, folder_name):
+        if folder_name is None:
+            return None
+
+        dirs = self.drive.ListFile({"q": "mimeType='application/vnd.google-apps.folder' and trashed=false"})\
+            .GetList()
+        dir_titles = [o["title"] for o in dirs]
+
+        if folder_name not in dir_titles:
+            new_dir = self.drive.CreateFile({"title": folder_name, "mimeType": "application/vnd.google-apps.folder"})
+            new_dir.Upload()
+            return new_dir["id"]
+        else:
+            for elem in dirs:
+                if elem["title"] == folder_name:
+                    return elem["id"]
+
+        raise Exception("Directory error")
