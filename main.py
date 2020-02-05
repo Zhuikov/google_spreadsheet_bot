@@ -1,10 +1,13 @@
 import google_tables
+from pprint import pprint
 
 
 def main():
 
     tables_interface = google_tables.TableInterface("client_secrets.json")
-    # list1 = tables_interface.create_spreadsheet("NewSpreadSheet2", "TheNewFolder", "ListList1")
+    spreadsheet = tables_interface.create_spreadsheet("AnotherSpreadSheet", "new_folder", "anotherList")
+    list = tables_interface.get_spreadsheets("new_folder")
+    pprint(list)
 
 
 main()
