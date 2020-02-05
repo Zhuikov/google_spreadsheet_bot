@@ -80,7 +80,7 @@ class TableInterface:
 
         return spreadsheet.url
 
-    # Returns all spreadsheets in folder_name directory
+    # Returns all spreadsheets {name, link, id} in folder_name directory
     def get_spreadsheets(self, folder_name):
         folder_id = self.__get_folder_id(folder_name)
 
@@ -90,11 +90,27 @@ class TableInterface:
         files = self.drive.ListFile({"q": "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"}) \
             .GetList()
 
-        files_name_id = [{"name": o["title"], "link": o["alternateLink"]} for o in files]
+        files_name_id = [{"name": o["title"], "link": o["alternateLink"], "id": o["id"]}
+                         for o in filter(lambda elem: elem["parents"][0]["id"] == folder_id, files)]
 
         return files_name_id
 
+    # Deletes spreadsheet_name from folder_name directory
+    # if there is one spreadsheet with spreadsheet_name in folder_name, returns empty list
+    # if there are several spreadsheets with spreadsheet_name then returns them in list {name, link, id}
+    # if spreadsheet_name not found in folder_name, returns None
+    def del_spreadsheet(self, folder_name, spreadsheet_name):
+        all_spreadsheet_list = self.get_spreadsheets(folder_name)
+        spreadsheets_with_name = list(filter(lambda elem: elem["name"] == spreadsheet_name, all_spreadsheet_list))
 
+        if len(spreadsheets_with_name) == 0:
+            return None
+
+        if len(spreadsheets_with_name) == 1:
+            self.client.drive.delete(spreadsheets_with_name[0]["id"])
+            return []
+
+        return spreadsheets_with_name
 
     # Returns folder's id if directory consists.
     # Else returns None
