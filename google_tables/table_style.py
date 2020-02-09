@@ -17,17 +17,16 @@ class TableStyle:
     # Список полей таблицы
     fields = []
 
-    # file_name -- файл с описанием стиля таблицы
+    # table_style -- список полей таблицы - описание ее стиля.
     # Стиль -- список лабораторных/Курсовых/Контрольных/... работ в течение курса,
     # а также наличие зачета и экзамена
-    def __init__(self, file_name):
-        self.fields.append(self.first_last_name)
-        with open(file_name) as input:
-            self.fields += (input.read().splitlines())
-            input.close()
-        if self.test in self.fields:
-            self.fields = [v for v in self.fields if v != self.test]
-            self.fields.append(self.test_field)
-        if self.exam in self.fields:
-            self.fields = [v for v in self.fields if v != self.exam]
-            self.fields.append(self.exam_field)
+    def __init__(self, table_style):
+        fields_ = [self.first_last_name]
+        fields_.extend(table_style)
+        if self.test in fields_:
+            fields_ = [v for v in fields_ if v != self.test]
+            fields_.append(self.test_field)
+        if self.exam in fields_:
+            fields_ = [v for v in fields_ if v != self.exam]
+            fields_.append(self.exam_field)
+        self.fields = fields_

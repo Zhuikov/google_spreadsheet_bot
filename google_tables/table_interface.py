@@ -24,14 +24,14 @@ class TableInterface:
 
         self.drive = GoogleDrive(g_auth)
 
-    # table_style_file -- path to style file
-    # group_list_file -- path to group list file
+    # table_style  -- list of table fields
+    # group_list -- list of students
     # Returns new spreadsheet's id
-    def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder_title, worksheet_title):
-        style = gt.TableStyle("temp_files/temp_table_style")
-        with open("temp_files/temp_group_list") as input:
-            lines = input.read().splitlines()
-            input.close()
+    def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder_title, worksheet_title,
+                           table_style, group_list):
+        print("Table_style in create_ssheet", table_style)
+        style = gt.TableStyle(table_style)
+        print("style_fields:", style.fields)
         spreadsheet_template = {
             "properties": {
                 "title": spreadsheet_title,
@@ -41,7 +41,7 @@ class TableInterface:
                 "properties": {
                     "title": worksheet_title,
                     "gridProperties": {
-                        "rowCount": len(lines) + 1,   # 1 is fields
+                        "rowCount": len(group_list) + 1,   # 1 is fields
                         "columnCount": len(style.fields),
                     }
                 }
@@ -49,6 +49,7 @@ class TableInterface:
         }
 
         spreadsheet_folder_id = self.__get_folder_id(spreadsheet_folder_title)
+        print("ID FOLDER =", spreadsheet_folder_id)
 
         if spreadsheet_folder_id is None:
             spreadsheet_folder_id = self.__create_folder(spreadsheet_folder_title)
@@ -56,12 +57,12 @@ class TableInterface:
         # init table fields and students' names
         spreadsheet = self.client.create(spreadsheet_title, spreadsheet_template, spreadsheet_folder_id)
         spreadsheet.sheet1.update_row(1, [style.fields])
-        spreadsheet.sheet1.update_col(1, [lines], row_offset=1)
+        spreadsheet.sheet1.update_col(1, [group_list], row_offset=1)
 
         # self.client.open_by_key("1wweVJX0tDh17C-ZrdehShAUXHJqtUlLbQ-uDm7jo7R0").delete()
         # folder = self.drive.CreateFile({"title": "my_folder", "mimeType": "application/vnd.google-apps.folder"})
         # folder.Upload()
-        pprint(self.client.drive.list(fields="files(name,id,parents)"))
+        # pprint(self.client.drive.list(fields="files(name,id,parents)"))
 
         # format students' names column
         first_col = spreadsheet.sheet1.get_col(1, returnas='range')
@@ -122,12 +123,12 @@ class TableInterface:
             .GetList()
         dir_titles = [o["title"] for o in dirs]
 
-        if folder_name in dir_titles:
-            for elem in dirs:
-                if elem["title"] == folder_name:
-                    return elem["id"]
+        if str(folder_name) not in dir_titles:
+            return None
 
-        return None
+        for elem in dirs:
+            if elem["title"] == str(folder_name):
+                return elem["id"]
 
     # Returns new folder's id
     def __create_folder(self, folder_name):
