@@ -19,6 +19,10 @@ users_map = {}
 
 creation_map = {}
 
+"""Deletion table list map"""
+
+deletion_map = {}
+
 """Bot's code"""
 
 
@@ -57,7 +61,7 @@ def help_command(message):
            "/get -- вывести список созданных пользователем таблиц.\n\n" \
            "/delete title -- удалить таблицу с указанным названием title\n" \
            "В случае нескольких таблиц с одинаковым названием предоставляется выбор нужной таблицы.\n\n" \
-           "/stop -- отменяет текущую операцию\n\n"
+           "/stop -- отменяет текущую операцию создания или уделения таблицы\n\n"
     bot.send_message(message.chat.id, text)
 
 
@@ -89,6 +93,14 @@ def create_command(message):
     users_map[message.from_user.id] = BotStatus.WAIT_TABLE_FORMAT
     bot.send_message(message.chat.id, "Отправьте файл с форматом таблицы")
 
+@bot.message_handler(commands=["map"])
+def __maps(message):
+    print("user map")
+    pprint(users_map)
+    print("creation map")
+    pprint(creation_map)
+    print("deletion map")
+    pprint(deletion_map)
 
 @bot.message_handler(func=lambda message: \
         message.document is not None and \
@@ -137,7 +149,7 @@ def get_command(message):
         bot.send_message(message.chat.id, "У вас пока нет таблиц")
         return
 
-    text = "Список таблиц:"
+    text = "Список ваших таблиц:"
     for table in table_list:
         text += "\n" + table["name"] + ": " + table["link"]
     bot.send_message(message.chat.id, text)
@@ -145,11 +157,14 @@ def get_command(message):
 
 @bot.message_handler(commands=["stop"])
 def stop_command(message):
-    global creation_params
-    creation_params = CreationParams()
-    global bot_status
-    bot_status = BotStatus.NORMAL_STATE
-    bot.send_message(message.chat.id, "Отмена всех действий")
+
+    if creation_map.pop(message.from_user.id, None) is not None:
+        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+        bot.send_message(message.chat.id, "Отмена создания таблицы")
+
+    if deletion_map.pop(message.from_user.id, None) is not None:
+        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+        bot.send_message(message.chat.id, "Отмена удаления таблицы")
 
 
 @bot.message_handler(commands=["delete"])
@@ -160,30 +175,52 @@ def delete_command(message):
         bot.send_message(message.chat.id, "Неверный формат команды, см. /help")
         return
 
-    global bot_status
-    bot_status = BotStatus.DELETING_TABLE
-    del_result = tables_api.del_spreadsheet(message.from_user, command_args[1])
+    users_map[message.from_user.id] = BotStatus.DELETING_TABLE
+
+    del_result = tables_api.del_spreadsheet(message.from_user.id, command_args[1])
 
     if del_result is None:
         bot.send_message(message.chat.id, "Таблица не найдена")
-        bot_status = BotStatus.NORMAL_STATE
+        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
         return
 
     if not del_result:
         bot.send_message(message.chat.id, "Таблица успешно удалена")
-        bot_status = BotStatus.NORMAL_STATE
+        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
         return
 
     if len(del_result) > 1:
+        deletion_map[message.from_user.id] = del_result
         table_list = command_args[1] + ":"
         for i in range(len(del_result)):
             current_table = "\n" + str(i) + ". " + del_result[i]["link"]
             table_list += current_table
-        bot.send_message(message.chat.id, "Выберите необходимую таблицу для удаления")
+        bot.send_message(message.chat.id, "Выберите номер таблицы для удаления")
         bot.send_message(message.chat.id, table_list)
 
 
-# @bot.message_handler(content_types=["text"])
+@bot.message_handler(func=lambda message:
+        users_map[message.from_user.id] == BotStatus.DELETING_TABLE, content_types=["text"])
+def deletion_table_number(message):
+
+    message_text = message.text
+    if not fullmatch("\d+", message_text):
+        bot.send_message(message.chat.id, "Отправьте номер нужной таблицы.")
+        return
+
+    table_number = int(message_text)
+
+    if table_number > len(deletion_map[message.from_user.id]):
+        bot.send_message(message.chat.id, "Число должно быть в меньше {0}."
+                         .format(str(len(deletion_map[message.from_user.id]))))
+        return
+
+    tables_api.del_spreadsheet_by_id(deletion_map[message.from_user.id][table_number]["id"])
+
+    deletion_map.pop(message.from_user.id, None)
+
+    users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+    bot.send_message(message.chat.id, "Таблица успешно удалена")
 
 
 @bot.message_handler(content_types=["text"])

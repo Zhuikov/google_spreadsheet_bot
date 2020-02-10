@@ -67,11 +67,12 @@ class TableInterface:
         # format students' names column
         first_col = spreadsheet.sheet1.get_col(1, returnas='range')
         first_col.apply_format(gt.CellStyle.student_names_format_cell)
-        spreadsheet.sheet1.adjust_column_width(0)
 
         # format table fields
         first_row = spreadsheet.sheet1.get_row(1, returnas='range')
         first_row.apply_format(gt.CellStyle.fields_format_cell)
+
+        spreadsheet.sheet1.adjust_column_width(0, spreadsheet.sheet1.cols)
 
         # set format of main table (with marks)
         main_field = spreadsheet.sheet1.get_values(
@@ -82,7 +83,7 @@ class TableInterface:
         return spreadsheet.url
 
     # Returns all spreadsheets {name, link, id} in folder_name directory
-    def get_spreadsheets(self, folder_name):
+    def get_spreadsheets(self, folder_name: str):
         folder_id = self.__get_folder_id(folder_name)
 
         if folder_name is None or folder_id is None:
@@ -100,8 +101,12 @@ class TableInterface:
     # if there is one spreadsheet with spreadsheet_name in folder_name, returns empty list
     # if there are several spreadsheets with spreadsheet_name then returns them in list {name, link, id}
     # if spreadsheet_name not found in folder_name, returns None
-    def del_spreadsheet(self, folder_name, spreadsheet_name):
+    def del_spreadsheet(self, folder_name: str, spreadsheet_name: str):
         all_spreadsheet_list = self.get_spreadsheets(folder_name)
+
+        if all_spreadsheet_list is None:
+            return None
+
         spreadsheets_with_name = list(filter(lambda elem: elem["name"] == spreadsheet_name, all_spreadsheet_list))
 
         if len(spreadsheets_with_name) == 0:
@@ -113,9 +118,27 @@ class TableInterface:
 
         return spreadsheets_with_name
 
+    # Deletes table by spreadsheet_id
+    def del_spreadsheet_by_id(self, spreadsheet_id):
+        self.client.drive.delete(spreadsheet_id)
+
+    def add_date_col(self, folder_name, spreadsheet_name, content):
+        all_spreadsheet_list = self.get_spreadsheets(folder_name)
+
+        if all_spreadsheet_list is None:
+            return None
+
+        spreadsheets_with_name = list(filter(lambda elem: elem["name"] == spreadsheet_name, all_spreadsheet_list))
+
+        if len(spreadsheets_with_name) == 0:
+            return None
+
+        if len(spreadsheets_with_name) == 1:
+            self.__find_date_col_index(spreadsheets_with_name[0]["id"])
+
     # Returns folder's id if directory consists.
     # Else returns None
-    def __get_folder_id(self, folder_name):
+    def __get_folder_id(self, folder_name: str):
         if folder_name is None:
             return None
 
@@ -135,3 +158,12 @@ class TableInterface:
         new_dir = self.drive.CreateFile({"title": folder_name, "mimeType": "application/vnd.google-apps.folder"})
         new_dir.Upload()
         return new_dir["id"]
+
+    def __find_date_col_index(self, spreadsheet_id):
+        worksheet = self.client.open_by_key(spreadsheet_id).sheet1
+        fields = worksheet.get_row(0, returnas='cell')
+
+        for field in fields:
+            # TODO
+            pass
+
