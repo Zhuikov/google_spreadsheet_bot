@@ -45,19 +45,21 @@ class CreationParams:
 class AttendanceLists:
     def __init__(self, students, spreadsheet_name):
         self.spreadsheet_name = spreadsheet_name
+        self.current_index = 0
         self.students = students
         self.attendance = []
 
 
 att_keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
-button1 = types.KeyboardButton("-")
-button2 = types.KeyboardButton("+")
+button1 = types.KeyboardButton("+")
+button2 = types.KeyboardButton("-")
 att_keyboard.add(button1, button2)
 
 # TODO: read old users from file
 """Bot's code"""
 
 bot = telebot.TeleBot(config.TOKEN)
+
 
 @bot.message_handler(commands=["help"])
 def help_command(message):
@@ -76,8 +78,7 @@ def help_command(message):
            " - col -- заголовок создаваемого столбца в таблице table\n" \
            "В результате успешного выполнения команды в таблице создается дополнительный столбец с проставленной" \
            "посещаемостью студентов. В заметку столбца добавляется текущая дата.\n\n" \
-           "/stop -- отменяет текущую операцию создания или удаления таблицы; " \
-           "а также процесс выставления посещаемости."
+           "/stop -- отменяет текущую операцию создания, удаления таблицы или процесс выставления посещаемости."
     bot.send_message(message.chat.id, text)
 
 
@@ -99,7 +100,9 @@ def create_command(message):
     bot.send_message(message.chat.id, "Бот готов к работе. Список команд: /help")
 
 
-@bot.message_handler(commands=["create"])
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     commands=["create"])
 def create_command(message):
     command_args = message.text.split()
     if len(command_args) != 3:
@@ -122,10 +125,11 @@ def create_command(message):
     bot.send_message(message.chat.id, "Отправьте файл с форматом таблицы")
 
 
-@bot.message_handler(func=lambda message: \
-        message.document is not None and \
-        message.document.mime_type == 'text/plain' and \
-        users_map[message.from_user.id] == UserStatus.WAIT_TABLE_FORMAT, content_types=['document'])
+@bot.message_handler(func=lambda message:
+                     message.document is not None and
+                     message.document.mime_type == 'text/plain' and
+                     users_map[message.from_user.id] == UserStatus.WAIT_TABLE_FORMAT,
+                     content_types=['document'])
 def handle_table_format_file(message):
 
     creation_params = creation_map[message.from_user.id]
@@ -136,10 +140,11 @@ def handle_table_format_file(message):
     bot.send_message(message.chat.id, "Теперь отправьте файл со списком группы")
 
 
-@bot.message_handler(func=lambda message: \
-        message.document is not None and \
-        message.document.mime_type == 'text/plain' and \
-        users_map[message.from_user.id] == UserStatus.WAIT_GROUP_LIST, content_types=['document'])
+@bot.message_handler(func=lambda message:
+                     message.document is not None and
+                     message.document.mime_type == 'text/plain' and
+                     users_map[message.from_user.id] == UserStatus.WAIT_GROUP_LIST,
+                     content_types=['document'])
 def handle_group_format_file(message):
 
     file_name = message.document.file_name.split(sep='.', maxsplit=1)[0]
@@ -153,15 +158,19 @@ def handle_group_format_file(message):
     creation_map[message.from_user.id] = creation_params
 
     users_map[message.from_user.id] = UserStatus.CREATING_TABLE
-    bot.send_message(message.chat.id, "Создание таблицы...")
+    bot.send_message(message.chat.id, "Создание таблицы и выдача доступа пользователю "
+                     + creation_map[message.from_user.id].user_email)
     table_url = __create_table(message.chat.id, message.from_user.id)
+
     bot.send_message(message.chat.id, "Таблица успешно создана.\nURL: " + table_url)
 
     creation_map.pop(message.from_user.id, None)
     users_map[message.from_user.id] = UserStatus.NORMAL_STATE
 
 
-@bot.message_handler(commands=["get"])
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     commands=["get"])
 def get_command(message):
     table_list = tables_api.get_spreadsheets(message.from_user.id)
 
@@ -171,7 +180,8 @@ def get_command(message):
 
     text = "Список ваших таблиц:"
     for table in table_list:
-        text += "\n" + table["name"] + ": " + table["link"]
+        line = "\n" + table["name"] + ": " + table["link"]
+        text += line
     bot.send_message(message.chat.id, text)
 
 
@@ -188,11 +198,13 @@ def stop_command(message):
 
     if att_map.pop(message.from_user.id, None) is not None:
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
-        bot.send_message(message.chat.id, "Отмена выставления посещаемости")
-        # TODO remove keyboard
+        bot.send_message(message.chat.id, "Отмена выставления посещаемости",
+                         reply_markup=telebot.types.ReplyKeyboardRemove())
 
 
-@bot.message_handler(commands=["delete"])
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     commands=["delete"])
 def delete_command(message):
     command_args = message.text.split()
 
@@ -225,7 +237,8 @@ def delete_command(message):
 
 
 @bot.message_handler(func=lambda message:
-    users_map[message.from_user.id] == UserStatus.DELETING_TABLE, content_types=["text"])
+                     users_map[message.from_user.id] == UserStatus.DELETING_TABLE,
+                     content_types=["text"])
 def deletion_table_number(message):
 
     message_text = message.text
@@ -248,7 +261,9 @@ def deletion_table_number(message):
     bot.send_message(message.chat.id, "Таблица успешно удалена")
 
 
-@bot.message_handler(commands=["att"])
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     commands=["att"])
 def att_command(message):
     command_args = message.text.split()
 
@@ -275,28 +290,34 @@ def att_command(message):
 
 
 @bot.message_handler(func=lambda message:
-    users_map[message.from_user.id] == UserStatus.ATT_STATE, content_types=["text"])
+                     users_map[message.from_user.id] == UserStatus.ATT_STATE,
+                     content_types=["text"])
 def att_student(message):
     text = message.text
 
     print(text)
-    if text != "+" or text != "-":
+    if text != "+" and text != "-":
         bot.send_message(message.chat.id, "Используйте - или +")
-        bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
+        bot.send_message(message.chat.id,
+                         att_map[message.from_user.id].students[att_map[message.from_user.id].current_index],
                      parse_mode="html", reply_markup=att_keyboard)
-    elif len(att_map[message.from_user.id]) > 0:
-        att_map[message.from_user.id].students.pop(0)
-        att_map[message.from_user.id].attenance.append("-" if text == "-" else "'+")
-        bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
-                     parse_mode="html", reply_markup=att_keyboard)
-    else:
-        # End of attendance check
-        tables_api.add_date_col(message.from_user.id, att_map[message.from_user.id].spreadsheet_name,
-                                att_map[message.from_user.id].attendence)
+        return
 
+    att_map[message.from_user.id].attendance.append("-" if text == "-" else "'+")
+    att_map[message.from_user.id].current_index += 1
+
+    if len(att_map[message.from_user.id].students) > att_map[message.from_user.id].current_index:
+        bot.send_message(message.chat.id,
+                         att_map[message.from_user.id].students[att_map[message.from_user.id].current_index],
+                         parse_mode="html", reply_markup=att_keyboard)
+    else:
+        bot.send_message(message.chat.id, "Выставление посещаемости...")
+        tables_api.add_date_col(message.from_user.id, att_map[message.from_user.id].spreadsheet_name,
+                                att_map[message.from_user.id].attendance)
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         att_map.pop(message.from_user.id, None)
-        bot.send_message(message.chat.id, "Посещаемость успешно выставлена")
+        bot.send_message(message.chat.id, "Посещаемость успешно выставлена",
+                         reply_markup=telebot.types.ReplyKeyboardRemove())
 
 
 @bot.message_handler(content_types=["text"])
@@ -326,7 +347,7 @@ def __create_table(chat_id, user_id):
     # TODO try-except
     creation_params = creation_map[user_id]
     url = tables_api.create_spreadsheet(creation_params.table_title, creation_params.table_directory,
-                                        creation_params.group_name, table_style, group_list)
+                                        creation_params.group_name, table_style, group_list, creation_params.user_email)
 
     return url
 

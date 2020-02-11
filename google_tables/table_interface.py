@@ -28,9 +28,9 @@ class TableInterface:
 
     # table_style  -- list of table fields
     # group_list -- list of students
-    # Returns new spreadsheet's id
+    # Returns new spreadsheet's url
     def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder_title, worksheet_title,
-                           table_style, group_list):
+                           table_style, group_list, share_email=None):
         print("Table_style in create_ssheet", table_style)
         style = gt.TableStyle(table_style)
         print("style_fields:", style.fields)
@@ -61,11 +61,6 @@ class TableInterface:
         spreadsheet.sheet1.update_row(1, [style.fields])
         spreadsheet.sheet1.update_col(1, [group_list], row_offset=1)
 
-        # self.client.open_by_key("1wweVJX0tDh17C-ZrdehShAUXHJqtUlLbQ-uDm7jo7R0").delete()
-        # folder = self.drive.CreateFile({"title": "my_folder", "mimeType": "application/vnd.google-apps.folder"})
-        # folder.Upload()
-        # pprint(self.client.drive.list(fields="files(name,id,parents)"))
-
         # format students' names column
         first_col = spreadsheet.sheet1.get_col(1, returnas='range')
         first_col.apply_format(gt.CellStyle.student_names_format_cell)
@@ -81,6 +76,9 @@ class TableInterface:
             (2, 2), (spreadsheet.sheet1.rows, spreadsheet.sheet1.cols), returnas='range',
             include_tailing_empty_rows=True)
         main_field.apply_format(gt.CellStyle.main_table_cell)
+
+        if share_email is not None:
+            spreadsheet.share(share_email, role='writer')
 
         return spreadsheet.url
 
