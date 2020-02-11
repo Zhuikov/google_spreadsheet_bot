@@ -1,5 +1,6 @@
 import telebot
 import requests
+from telebot import types
 from re import fullmatch
 from enum import Enum
 from google_tables import TableInterface
@@ -15,23 +16,20 @@ tables_api = TableInterface("botsCreds.json")
 
 users_map = {}
 
-"""Creation params map"""
+"""Maps used in user's complex operations"""
 
 creation_map = {}
-
-"""Deletion table list map"""
-
 deletion_map = {}
+att_map = {}
 
-"""Bot's code"""
 
-
-class BotStatus(Enum):
+class UserStatus(Enum):
     NORMAL_STATE = 1
     WAIT_TABLE_FORMAT = 2
     WAIT_GROUP_LIST = 3
     CREATING_TABLE = 4
     DELETING_TABLE = 5
+    ATT_STATE = 6
 
 
 class CreationParams:
@@ -43,11 +41,23 @@ class CreationParams:
         self.group_name = None
         self.user_email = None
 
-# TODO: read old users from file
 
+class AttendanceLists:
+    def __init__(self, students, spreadsheet_name):
+        self.spreadsheet_name = spreadsheet_name
+        self.students = students
+        self.attendance = []
+
+
+att_keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+button1 = types.KeyboardButton("-")
+button2 = types.KeyboardButton("+")
+att_keyboard.add(button1, button2)
+
+# TODO: read old users from file
+"""Bot's code"""
 
 bot = telebot.TeleBot(config.TOKEN)
-
 
 @bot.message_handler(commands=["help"])
 def help_command(message):
@@ -61,13 +71,31 @@ def help_command(message):
            "/get -- вывести список созданных пользователем таблиц.\n\n" \
            "/delete title -- удалить таблицу с указанным названием title\n" \
            "В случае нескольких таблиц с одинаковым названием предоставляется выбор нужной таблицы.\n\n" \
-           "/stop -- отменяет текущую операцию создания или уделения таблицы\n\n"
+           "/att table col -- начать выставление посещаемости\n" \
+           " - table -- заголовок документа таблицы\n" \
+           " - col -- заголовок создаваемого столбца в таблице table\n" \
+           "В результате успешного выполнения команды в таблице создается дополнительный столбец с проставленной" \
+           "посещаемостью студентов. В заметку столбца добавляется текущая дата.\n\n" \
+           "/stop -- отменяет текущую операцию создания или удаления таблицы; " \
+           "а также процесс выставления посещаемости."
     bot.send_message(message.chat.id, text)
+
+
+@bot.message_handler(commands=["map"])
+def __maps(message):
+    print("user map")
+    pprint(users_map)
+    print("creation map")
+    pprint(creation_map)
+    print("deletion map")
+    pprint(deletion_map)
+    print("att_map")
+    pprint(att_map)
 
 
 @bot.message_handler(commands=["start"])
 def create_command(message):
-    users_map.update([(message.from_user.id, BotStatus.NORMAL_STATE)])
+    users_map.update([(message.from_user.id, UserStatus.NORMAL_STATE)])
     bot.send_message(message.chat.id, "Бот готов к работе. Список команд: /help")
 
 
@@ -90,36 +118,28 @@ def create_command(message):
     creation_params.user_email = command_args[2]
     creation_map[message.from_user.id] = creation_params
 
-    users_map[message.from_user.id] = BotStatus.WAIT_TABLE_FORMAT
+    users_map[message.from_user.id] = UserStatus.WAIT_TABLE_FORMAT
     bot.send_message(message.chat.id, "Отправьте файл с форматом таблицы")
 
-@bot.message_handler(commands=["map"])
-def __maps(message):
-    print("user map")
-    pprint(users_map)
-    print("creation map")
-    pprint(creation_map)
-    print("deletion map")
-    pprint(deletion_map)
 
 @bot.message_handler(func=lambda message: \
         message.document is not None and \
         message.document.mime_type == 'text/plain' and \
-        users_map[message.from_user.id] == BotStatus.WAIT_TABLE_FORMAT, content_types=['document'])
+        users_map[message.from_user.id] == UserStatus.WAIT_TABLE_FORMAT, content_types=['document'])
 def handle_table_format_file(message):
 
     creation_params = creation_map[message.from_user.id]
     creation_params.table_file = message.document.file_id
     creation_map[message.from_user.id] = creation_params
 
-    users_map[message.from_user.id] = BotStatus.WAIT_GROUP_LIST
+    users_map[message.from_user.id] = UserStatus.WAIT_GROUP_LIST
     bot.send_message(message.chat.id, "Теперь отправьте файл со списком группы")
 
 
 @bot.message_handler(func=lambda message: \
         message.document is not None and \
         message.document.mime_type == 'text/plain' and \
-        users_map[message.from_user.id] == BotStatus.WAIT_GROUP_LIST, content_types=['document'])
+        users_map[message.from_user.id] == UserStatus.WAIT_GROUP_LIST, content_types=['document'])
 def handle_group_format_file(message):
 
     file_name = message.document.file_name.split(sep='.', maxsplit=1)[0]
@@ -132,13 +152,13 @@ def handle_group_format_file(message):
     creation_params.group_name = file_name
     creation_map[message.from_user.id] = creation_params
 
-    users_map[message.from_user.id] = BotStatus.CREATING_TABLE
+    users_map[message.from_user.id] = UserStatus.CREATING_TABLE
     bot.send_message(message.chat.id, "Создание таблицы...")
     table_url = __create_table(message.chat.id, message.from_user.id)
     bot.send_message(message.chat.id, "Таблица успешно создана.\nURL: " + table_url)
 
     creation_map.pop(message.from_user.id, None)
-    users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+    users_map[message.from_user.id] = UserStatus.NORMAL_STATE
 
 
 @bot.message_handler(commands=["get"])
@@ -159,12 +179,17 @@ def get_command(message):
 def stop_command(message):
 
     if creation_map.pop(message.from_user.id, None) is not None:
-        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         bot.send_message(message.chat.id, "Отмена создания таблицы")
 
     if deletion_map.pop(message.from_user.id, None) is not None:
-        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         bot.send_message(message.chat.id, "Отмена удаления таблицы")
+
+    if att_map.pop(message.from_user.id, None) is not None:
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+        bot.send_message(message.chat.id, "Отмена выставления посещаемости")
+        # TODO remove keyboard
 
 
 @bot.message_handler(commands=["delete"])
@@ -175,18 +200,18 @@ def delete_command(message):
         bot.send_message(message.chat.id, "Неверный формат команды, см. /help")
         return
 
-    users_map[message.from_user.id] = BotStatus.DELETING_TABLE
+    users_map[message.from_user.id] = UserStatus.DELETING_TABLE
 
     del_result = tables_api.del_spreadsheet(message.from_user.id, command_args[1])
 
     if del_result is None:
         bot.send_message(message.chat.id, "Таблица не найдена")
-        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         return
 
     if not del_result:
         bot.send_message(message.chat.id, "Таблица успешно удалена")
-        users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         return
 
     if len(del_result) > 1:
@@ -200,7 +225,7 @@ def delete_command(message):
 
 
 @bot.message_handler(func=lambda message:
-        users_map[message.from_user.id] == BotStatus.DELETING_TABLE, content_types=["text"])
+    users_map[message.from_user.id] == UserStatus.DELETING_TABLE, content_types=["text"])
 def deletion_table_number(message):
 
     message_text = message.text
@@ -219,8 +244,59 @@ def deletion_table_number(message):
 
     deletion_map.pop(message.from_user.id, None)
 
-    users_map[message.from_user.id] = BotStatus.NORMAL_STATE
+    users_map[message.from_user.id] = UserStatus.NORMAL_STATE
     bot.send_message(message.chat.id, "Таблица успешно удалена")
+
+
+@bot.message_handler(commands=["att"])
+def att_command(message):
+    command_args = message.text.split()
+
+    if len(command_args) != 3:
+        bot.send_message(message.chat.id, "Неверный формат команды, см. /help")
+        return
+
+    students_list = tables_api.get_students_list(message.from_user.id, command_args[1])
+
+    if students_list is None:
+        bot.send_message(message.chat.id, "Таблица не найдена")
+        return
+
+    if not students_list:
+        bot.send_message(message.chat.id, "Список студентов пуст")
+        return
+
+    att_map[message.from_user.id] = AttendanceLists(students_list, command_args[1])
+    att_map[message.from_user.id].attendance.append(command_args[2])
+    users_map[message.from_user.id] = UserStatus.ATT_STATE
+
+    bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
+                     parse_mode="html", reply_markup=att_keyboard)
+
+
+@bot.message_handler(func=lambda message:
+    users_map[message.from_user.id] == UserStatus.ATT_STATE, content_types=["text"])
+def att_student(message):
+    text = message.text
+
+    print(text)
+    if text != "+" or text != "-":
+        bot.send_message(message.chat.id, "Используйте - или +")
+        bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
+                     parse_mode="html", reply_markup=att_keyboard)
+    elif len(att_map[message.from_user.id]) > 0:
+        att_map[message.from_user.id].students.pop(0)
+        att_map[message.from_user.id].attenance.append("-" if text == "-" else "'+")
+        bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
+                     parse_mode="html", reply_markup=att_keyboard)
+    else:
+        # End of attendance check
+        tables_api.add_date_col(message.from_user.id, att_map[message.from_user.id].spreadsheet_name,
+                                att_map[message.from_user.id].attendence)
+
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+        att_map.pop(message.from_user.id, None)
+        bot.send_message(message.chat.id, "Посещаемость успешно выставлена")
 
 
 @bot.message_handler(content_types=["text"])

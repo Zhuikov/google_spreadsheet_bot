@@ -6,11 +6,8 @@ def main():
 
     tables_interface = google_tables.TableInterface("client_secrets.json")
     # spreadsheet = tables_interface.create_spreadsheet("SpreadSheetAnotherDir", "new_folder2", "anotherList")
-    list = tables_interface.get_spreadsheets("new_folder2")
-    pprint(list)
-    pprint(tables_interface.del_spreadsheet("new_folder2", "SpreadSheetAnotherDir"))
-    # list = tables_interface.get_spreadsheets("new_folder2")
-    # pprint(list)
+    # tables_interface.add_date_col("219651041", "GoodTable", ["TEST6", "-", "'+", "-", "-", "'+", "'+"])
+    print(tables_interface.get_students_list("219651041", "GoodTable"))
 
 
 main()

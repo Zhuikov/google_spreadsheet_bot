@@ -1,6 +1,8 @@
 import pygsheets
+import datetime
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
+from re import fullmatch
 
 import google_tables as gt
 
@@ -97,6 +99,30 @@ class TableInterface:
 
         return files_name_id
 
+    # Returns list of students first name and second name
+    # Students must be in A column
+    # If there is no folder_name or spreadsheet_name returns None
+    # If there are several spreadsheet_name documents also returns None
+    def get_students_list(self, folder_name, spreadsheet_name):
+        all_spreadsheet_list = self.get_spreadsheets(folder_name)
+
+        if all_spreadsheet_list is None:
+            return None
+
+        spreadsheets_with_name = list(filter(lambda elem: elem["name"] == spreadsheet_name, all_spreadsheet_list))
+
+        if len(spreadsheets_with_name) == 0:
+            return None
+
+        if len(spreadsheets_with_name) == 1:
+            worksheet = self.client.open_by_key(spreadsheets_with_name[0]["id"]).sheet1
+            students_range = worksheet.range("A2:A" + str(worksheet.rows), returnas='cell')
+            students_list = [cell.value for cells in students_range for cell in cells]
+            return students_list
+
+        if len(spreadsheets_with_name) > 1:
+            return None
+
     # Deletes spreadsheet_name from folder_name directory
     # if there is one spreadsheet with spreadsheet_name in folder_name, returns empty list
     # if there are several spreadsheets with spreadsheet_name then returns them in list {name, link, id}
@@ -122,6 +148,8 @@ class TableInterface:
     def del_spreadsheet_by_id(self, spreadsheet_id):
         self.client.drive.delete(spreadsheet_id)
 
+    # Creates new column with attendance content
+    # content[0] -- col name, content[n] -- attendance of student (+/-)
     def add_date_col(self, folder_name, spreadsheet_name, content):
         all_spreadsheet_list = self.get_spreadsheets(folder_name)
 
@@ -134,7 +162,28 @@ class TableInterface:
             return None
 
         if len(spreadsheets_with_name) == 1:
-            self.__find_date_col_index(spreadsheets_with_name[0]["id"])
+            spreadsheet_id = spreadsheets_with_name[0]["id"]
+            insert_index = self.__find_date_col_index(spreadsheet_id)
+            print(insert_index)
+
+            spreadsheet = self.client.open_by_key(spreadsheet_id)
+            spreadsheet.sheet1.insert_cols(insert_index, values=content, inherit=True)
+            spreadsheet.sheet1.adjust_column_width(insert_index)
+
+            now = datetime.datetime.now()
+            pprint(spreadsheet.sheet1.cell(addr=(1, insert_index + 1)))
+            added_field_cell = spreadsheet.sheet1.cell((1, insert_index + 1))
+            added_field_cell.note = str(now.day) + "." + str(now.month) + "." + str(now.year)
+
+            new_col_content = spreadsheet.sheet1.get_values(
+                (2, insert_index + 1), (spreadsheet.sheet1.rows, insert_index + 1), returnas='range',
+                include_tailing_empty_rows=True)
+            new_col_content.apply_format(gt.CellStyle.main_table_cell)
+
+            return True
+
+        if len(spreadsheets_with_name) > 1:
+            return False
 
     # Returns folder's id if directory consists.
     # Else returns None
@@ -161,9 +210,13 @@ class TableInterface:
 
     def __find_date_col_index(self, spreadsheet_id):
         worksheet = self.client.open_by_key(spreadsheet_id).sheet1
-        fields = worksheet.get_row(0, returnas='cell')
+        fields = worksheet.get_row(1, returnas='cell')
 
-        for field in fields:
-            # TODO
-            pass
+        index = None
+        for i in range(len(fields)):
+            if fullmatch("\d{1,2}\.\d{1,2}\.\d{4}", str(fields[i].note)):
+                print(str(fields[i].note))
+                index = i
+
+        return 1 if index is None else index + 1
 
