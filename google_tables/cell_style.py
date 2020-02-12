@@ -10,6 +10,7 @@ class CellStyle:
         "horizontal_alignment": pygsheets.custom_types.HorizontalAlignment.CENTER,
         "borders": {"top": {"style": "SOLID"}, "bottom": {"style": "SOLID"},
                     "left": {"style": "SOLID"}, "right": {"style": "SOLID"}}
+        # "wrapStrategy": "OVERFLOW_CELL"
     }
 
     students_names_format = {
@@ -30,6 +31,7 @@ class CellStyle:
     fields_format_cell.horizontal_alignment = fields_format["horizontal_alignment"]
     fields_format_cell.color = fields_format["backgroundColor"]
     fields_format_cell.borders = fields_format["borders"]
+    # fields_format_cell.wrap_strategy = fields_format["wrapStrategy"]
     fields_format_cell.set_text_format("fontFamily", fields_format["fontFamily"])
     fields_format_cell.set_text_format("fontSize", fields_format["fontSize"])
 

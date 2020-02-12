@@ -12,9 +12,10 @@ from pprint import pprint
 
 tables_api = TableInterface("botsCreds.json")
 
-"""User's status map"""
+"""User's status and tables maps"""
 
 users_map = {}
+tables_map = {}
 
 """Maps used in user's complex operations"""
 
@@ -39,7 +40,6 @@ class CreationParams:
         self.group_file = None
         self.table_file = None
         self.group_name = None
-        self.user_email = None
 
 
 class AttendanceLists:
@@ -64,18 +64,22 @@ bot = telebot.TeleBot(config.TOKEN)
 @bot.message_handler(commands=["help"])
 def help_command(message):
     text = "Команды:\n\n" \
-           "/create title e-mail -- создать документ Google spreadsheet\n" \
-           " - title -- заголовок документа (без пробелов)\n" \
-           " - e-mail -- пользователь, которому необходимо предоставить доступ к созданной таблице.\n" \
+           "/create title -- создать документ Google spreadsheet.\n" \
+           " - title -- заголовок документа (без пробелов).\n\n" \
            "После отправки команды необходимо выслать файл с форматом таблицы; затем -- файл со списком группы. " \
            "Название файла группы должно соответствовать ее номеру (\"NUM[_NUM][.txt]\").\n" \
            "После успешного создания таблицы бот присылает адрес таблицы на сервисе Google Spreadsheets.\n\n" \
+           "/share e-mail role -- предоставить пользователю доступ к созданной таблице с указанной ролью.\n" \
+           " - e-mail -- пользователь, которому необходимо предоставить доступ к созданной таблице,\n" \
+           " - role -- права доступа R или W (r или w), где R -- доступ только для чтения, " \
+           "W -- доступ для редактирования.\n" \
+           "После успешной выдачи прав бот присылает адрес таблицы.\n\n" \
            "/get -- вывести список созданных пользователем таблиц.\n\n" \
-           "/delete title -- удалить таблицу с указанным названием title\n" \
+           "/delete title -- удалить таблицу с указанным названием title.\n" \
            "В случае нескольких таблиц с одинаковым названием предоставляется выбор нужной таблицы.\n\n" \
-           "/att table col -- начать выставление посещаемости\n" \
-           " - table -- заголовок документа таблицы\n" \
-           " - col -- заголовок создаваемого столбца в таблице table\n" \
+           "/att table col -- начать выставление посещаемости студентов.\n" \
+           " - table -- заголовок документа таблицы,\n" \
+           " - col -- заголовок создаваемого столбца в таблице table.\n" \
            "В результате успешного выполнения команды в таблице создается дополнительный столбец с проставленной" \
            "посещаемостью студентов. В заметку столбца добавляется текущая дата.\n\n" \
            "/stop -- отменяет текущую операцию создания, удаления таблицы или процесс выставления посещаемости."
@@ -86,6 +90,8 @@ def help_command(message):
 def __maps(message):
     print("user map")
     pprint(users_map)
+    print("tables_map")
+    pprint(tables_map)
     print("creation map")
     pprint(creation_map)
     print("deletion map")
@@ -96,7 +102,9 @@ def __maps(message):
 
 @bot.message_handler(commands=["start"])
 def create_command(message):
-    users_map.update([(message.from_user.id, UserStatus.NORMAL_STATE)])
+    users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+    user_tables = tables_api.get_spreadsheets(message.from_user.id)
+    tables_map[message.from_user.id] = user_tables if user_tables is not None else []
     bot.send_message(message.chat.id, "Бот готов к работе. Список команд: /help")
 
 
@@ -105,20 +113,13 @@ def create_command(message):
                      commands=["create"])
 def create_command(message):
     command_args = message.text.split()
-    if len(command_args) != 3:
+    if len(command_args) != 2:
         bot.send_message(message.chat.id, "Неверный формат команды. (см. /help)")
         return
-
-    if not fullmatch(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)", command_args[2]):
-        bot.send_message(message.chat.id, "Неверный формат e-mail адреса")
-        return
-
-    print(command_args)
 
     creation_params = CreationParams()
     creation_params.table_directory = message.from_user.id
     creation_params.table_title = command_args[1]
-    creation_params.user_email = command_args[2]
     creation_map[message.from_user.id] = creation_params
 
     users_map[message.from_user.id] = UserStatus.WAIT_TABLE_FORMAT
@@ -132,9 +133,10 @@ def create_command(message):
                      content_types=['document'])
 def handle_table_format_file(message):
 
-    creation_params = creation_map[message.from_user.id]
-    creation_params.table_file = message.document.file_id
-    creation_map[message.from_user.id] = creation_params
+    creation_map[message.from_user.id].table_file = message.document.file_id
+    # creation_params = creation_map[message.from_user.id]
+    # creation_params.table_file = message.document.file_id
+    # creation_map[message.from_user.id] = creation_params
 
     users_map[message.from_user.id] = UserStatus.WAIT_GROUP_LIST
     bot.send_message(message.chat.id, "Теперь отправьте файл со списком группы")
@@ -158,14 +160,44 @@ def handle_group_format_file(message):
     creation_map[message.from_user.id] = creation_params
 
     users_map[message.from_user.id] = UserStatus.CREATING_TABLE
-    bot.send_message(message.chat.id, "Создание таблицы и выдача доступа пользователю "
-                     + creation_map[message.from_user.id].user_email)
     table_url = __create_table(message.chat.id, message.from_user.id)
 
     bot.send_message(message.chat.id, "Таблица успешно создана.\nURL: " + table_url)
 
     creation_map.pop(message.from_user.id, None)
     users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+
+
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     commands=["share"])
+def share_command(message):
+    command_args = message.text.split()
+    if len(command_args) != 4:
+        bot.send_message(message.chat.id, "Наверное количество аргументов. См /help")
+        return
+    # command_args = ['/share', table_name, e-mail, role]
+
+    if not fullmatch(r"(^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$)", command_args[2]):
+        bot.send_message(message.chat.id, "Неверный формат e-mail адреса")
+        return
+
+    if not fullmatch(r"(R|r|W|w)", command_args[3]):
+        bot.send_message(message.chat.id, "Неверный формат выдаваемых прав доступа. Необходимо R/r или W/w")
+        return
+
+    table_params = __get_table_by_name(message.from_user.id, command_args[1])
+
+    if table_params is None:
+        bot.send_message(message.chat.id, "Таблица \"" + command_args[1] + "\" не найдена")
+        return
+
+    try:
+        tables_api.share_table(table_params["id"], command_args[2], command_args[3])
+        bot.send_message(message.chat.id, "Права на таблицу успешно выданы")
+    except Exception:
+        bot.send_message(message.chat.id, "Ошибка")
+        return
 
 
 @bot.message_handler(func=lambda message:
@@ -325,6 +357,16 @@ def echo(message):
     bot.send_message(message.chat.id, message.text)
 
 
+# Returns object from table_map by table_name
+def __get_table_by_name(user_id, table_name):
+    table_object = None
+    for table in tables_map[user_id]:
+        if table["name"] == table_name:
+            table_object = table
+
+    return table_object
+
+
 def __create_table(chat_id, user_id):
     bot.send_message(chat_id, "Загрузка файлов формата таблицы и списка группы.")
 
@@ -347,7 +389,7 @@ def __create_table(chat_id, user_id):
     # TODO try-except
     creation_params = creation_map[user_id]
     url = tables_api.create_spreadsheet(creation_params.table_title, creation_params.table_directory,
-                                        creation_params.group_name, table_style, group_list, creation_params.user_email)
+                                        creation_params.group_name, table_style, group_list)
 
     return url
 

@@ -30,7 +30,7 @@ class TableInterface:
     # group_list -- list of students
     # Returns new spreadsheet's url
     def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder_title, worksheet_title,
-                           table_style, group_list, share_email=None):
+                           table_style, group_list):
         print("Table_style in create_ssheet", table_style)
         style = gt.TableStyle(table_style)
         print("style_fields:", style.fields)
@@ -66,6 +66,7 @@ class TableInterface:
         first_col.apply_format(gt.CellStyle.student_names_format_cell)
 
         # format table fields
+        # TODO wrap strategy
         first_row = spreadsheet.sheet1.get_row(1, returnas='range')
         first_row.apply_format(gt.CellStyle.fields_format_cell)
 
@@ -77,10 +78,11 @@ class TableInterface:
             include_tailing_empty_rows=True)
         main_field.apply_format(gt.CellStyle.main_table_cell)
 
-        if share_email is not None:
-            spreadsheet.share(share_email, role='writer')
-
         return spreadsheet.url
+
+    def share_table(self, spreadsheet_id, user_mail, role):
+        spreadsheet = self.client.open_by_key(spreadsheet_id)
+        spreadsheet.share()
 
     # Returns all spreadsheets {name, link, id} in folder_name directory
     def get_spreadsheets(self, folder_name: str):
