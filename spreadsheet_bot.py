@@ -14,14 +14,15 @@ tables_api = TableInterface("botsCreds.json")
 
 """User's status and tables maps"""
 
-users_map = {}
-tables_map = {}
+users_map = {}  # { user_id: UserStatus }
+tables_map = {}  # { user_id: {id, name, link} }
 
 """Maps used in user's complex operations"""
 
-creation_map = {}
-deletion_map = {}
-att_map = {}
+creation_map = {}  # { user_id: CreationParams }
+deletion_map = {}  # { user_id: *list of tables with equals name* }
+att_map = {}  # { user_id: AttendanceLists }
+sharing_map = {}  # { user_id: SharingParams }
 
 
 class UserStatus(Enum):
@@ -30,7 +31,10 @@ class UserStatus(Enum):
     WAIT_GROUP_LIST = 3
     CREATING_TABLE = 4
     DELETING_TABLE = 5
-    ATT_STATE = 6
+    DELETING_TABLE_WAITING = 6
+    SHARING_TABLE = 7
+    SHARING_TABLE_WAITING = 8
+    ATT_STATE = 9
 
 
 class CreationParams:
@@ -40,6 +44,14 @@ class CreationParams:
         self.group_file = None
         self.table_file = None
         self.group_name = None
+
+
+class SharingParams:
+    # tables -- list of tables with equal name
+    def __init__(self, tables, user_mail, role):
+        self.tables = tables
+        self.user_mail = user_mail
+        self.role = role
 
 
 class AttendanceLists:
@@ -109,7 +121,7 @@ def create_command(message):
 
 
 @bot.message_handler(func=lambda message:
-                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["create"])
 def create_command(message):
     command_args = message.text.split()
@@ -127,16 +139,12 @@ def create_command(message):
 
 
 @bot.message_handler(func=lambda message:
-                     message.document is not None and
-                     message.document.mime_type == 'text/plain' and
-                     users_map[message.from_user.id] == UserStatus.WAIT_TABLE_FORMAT,
+message.document is not None and
+message.document.mime_type == 'text/plain' and
+users_map[message.from_user.id] == UserStatus.WAIT_TABLE_FORMAT,
                      content_types=['document'])
 def handle_table_format_file(message):
-
     creation_map[message.from_user.id].table_file = message.document.file_id
-    # creation_params = creation_map[message.from_user.id]
-    # creation_params.table_file = message.document.file_id
-    # creation_map[message.from_user.id] = creation_params
 
     users_map[message.from_user.id] = UserStatus.WAIT_GROUP_LIST
     bot.send_message(message.chat.id, "Теперь отправьте файл со списком группы")
@@ -148,27 +156,35 @@ def handle_table_format_file(message):
                      users_map[message.from_user.id] == UserStatus.WAIT_GROUP_LIST,
                      content_types=['document'])
 def handle_group_format_file(message):
-
     file_name = message.document.file_name.split(sep='.', maxsplit=1)[0]
     if not fullmatch("\d+(_\d+)?(\.txt)?", file_name):
         bot.send_message(message.chat.id, "Неверный формат названия файла. Переименуйте файл и отправьте заново.")
         return
 
-    creation_params = creation_map[message.from_user.id]
-    creation_params.group_file = message.document.file_id
-    creation_params.group_name = file_name
-    creation_map[message.from_user.id] = creation_params
+    creation_map[message.from_user.id].group_file = message.document.file_id
+    creation_map[message.from_user.id].file_name = message.document.file_name
 
     users_map[message.from_user.id] = UserStatus.CREATING_TABLE
-    table_url = __create_table(message.chat.id, message.from_user.id)
 
-    bot.send_message(message.chat.id, "Таблица успешно создана.\nURL: " + table_url)
+    creation_params = creation_map[message.from_user.id]
+
+    try:
+        created_table = __create_table(message.chat.id, creation_params)
+    except Exception:
+        bot.send_message(message.chat.id, "Ошибка при создании таблицы")
+        return
 
     creation_map.pop(message.from_user.id, None)
+    tables_map[message.from_user.id].append({"id": created_table["id"],
+                                             "name": creation_params.table_title,
+                                             "link": created_table["link"]})
+
     users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+    bot.send_message(message.chat.id, "Таблица успешно создана.\n" + created_table["link"])
 
 
 @bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] is not None and
                      users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["share"])
 def share_command(message):
@@ -186,32 +202,71 @@ def share_command(message):
         bot.send_message(message.chat.id, "Неверный формат выдаваемых прав доступа. Необходимо R/r или W/w")
         return
 
-    table_params = __get_table_by_name(message.from_user.id, command_args[1])
+    share_tables = list(filter(lambda x: x["name"] == command_args[1], tables_map[message.from_user.id]))
 
-    if table_params is None:
+    if not share_tables:
         bot.send_message(message.chat.id, "Таблица \"" + command_args[1] + "\" не найдена")
         return
 
-    try:
-        tables_api.share_table(table_params["id"], command_args[2], command_args[3])
-        bot.send_message(message.chat.id, "Права на таблицу успешно выданы")
-    except Exception:
-        bot.send_message(message.chat.id, "Ошибка")
+    if len(share_tables) == 1:
+        users_map[message.from_user.id] = UserStatus.SHARING_TABLE
+        try:
+            url = tables_api.share_table(share_tables[0]["id"], command_args[2], command_args[3].lower())
+        except Exception:
+            bot.send_message(message.chat.id, "Ошибка при выдаче прав")
+            users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+            return
+
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+        bot.send_message(message.chat.id, "Права на таблицу успешно предоставлены: " + url)
         return
+
+    # Many tables with equal name
+    sharing_map[message.from_user.id] = SharingParams(share_tables, command_args[2], command_args[3])
+    users_map[message.from_user.id] = UserStatus.SHARING_TABLE_WAITING
+    table_list = command_args[1] + ":"
+    for i in range(len(share_tables)):
+        current_line = "\n" + str(i) + ". " + share_tables[i]["link"]
+        table_list += current_line
+    bot.send_message(message.chat.id, "Выберите номер таблицы для выдачи прав")
+    bot.send_message(message.chat.id, table_list)
+
+
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.SHARING_TABLE_WAITING,
+                     content_types=["text"])
+def deletion_table_number(message):
+    message_text = message.text
+    if not fullmatch("\d+", message_text):
+        bot.send_message(message.chat.id, "Отправьте номер нужной таблицы.")
+        return
+
+    table_number = int(message_text)
+
+    if table_number > len(sharing_map[message.from_user.id].tables):
+        bot.send_message(message.chat.id, "Число должно быть меньше {0}."
+                         .format(str(len(deletion_map[message.from_user.id]))))
+        return
+
+    url = tables_api.share_table(sharing_map[message.from_user.id].tables[table_number],
+                                 sharing_map[message.from_user.id].user_mail,
+                                 sharing_map[message.from_user.id].role)
+
+    sharing_map.pop(message.from_user.id, None)
+    users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+    bot.send_message(message.chat.id, "Права на таблицу успешно предоставлены: " + url)
 
 
 @bot.message_handler(func=lambda message:
                      users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["get"])
 def get_command(message):
-    table_list = tables_api.get_spreadsheets(message.from_user.id)
-
-    if table_list is None:
+    if not tables_map[message.from_user.id]:
         bot.send_message(message.chat.id, "У вас пока нет таблиц")
         return
 
     text = "Список ваших таблиц:"
-    for table in table_list:
+    for table in tables_map[message.from_user.id]:
         line = "\n" + table["name"] + ": " + table["link"]
         text += line
     bot.send_message(message.chat.id, text)
@@ -219,7 +274,6 @@ def get_command(message):
 
 @bot.message_handler(commands=["stop"])
 def stop_command(message):
-
     if creation_map.pop(message.from_user.id, None) is not None:
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         bot.send_message(message.chat.id, "Отмена создания таблицы")
@@ -235,44 +289,47 @@ def stop_command(message):
 
 
 @bot.message_handler(func=lambda message:
-                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+users_map[message.from_user.id] is not None and
+users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["delete"])
 def delete_command(message):
     command_args = message.text.split()
+    # command_args = ['/delete', table_name]
 
     if len(command_args) != 2:
         bot.send_message(message.chat.id, "Неверный формат команды, см. /help")
         return
 
-    users_map[message.from_user.id] = UserStatus.DELETING_TABLE
+    deleting_table = list(filter(lambda x: x["name"] == command_args[1], tables_map[message.from_user.id]))
 
-    del_result = tables_api.del_spreadsheet(message.from_user.id, command_args[1])
-
-    if del_result is None:
+    if not deleting_table:
         bot.send_message(message.chat.id, "Таблица не найдена")
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         return
 
-    if not del_result:
-        bot.send_message(message.chat.id, "Таблица успешно удалена")
+    if len(deleting_table) == 1:
+        users_map[message.from_user.id] = UserStatus.DELETING_TABLE
+        tables_api.del_spreadsheet_by_id(deleting_table[0]["id"])
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+        __remove_from_tables_map(message.from_user.id, deleting_table[0]["id"])
+        bot.send_message(message.chat.id, "Таблица успешно удалена")
         return
 
-    if len(del_result) > 1:
-        deletion_map[message.from_user.id] = del_result
-        table_list = command_args[1] + ":"
-        for i in range(len(del_result)):
-            current_table = "\n" + str(i) + ". " + del_result[i]["link"]
-            table_list += current_table
-        bot.send_message(message.chat.id, "Выберите номер таблицы для удаления")
-        bot.send_message(message.chat.id, table_list)
+    # Many tables with equal names
+    deletion_map[message.from_user.id] = deleting_table
+    users_map[message.from_user.id] = UserStatus.DELETING_TABLE_WAITING
+    table_list = command_args[1] + ":"
+    for i in range(len(deleting_table)):
+        current_line = "\n" + str(i) + ". " + deleting_table[i]["link"]
+        table_list += current_line
+    bot.send_message(message.chat.id, "Выберите номер таблицы для удаления")
+    bot.send_message(message.chat.id, table_list)
 
 
 @bot.message_handler(func=lambda message:
-                     users_map[message.from_user.id] == UserStatus.DELETING_TABLE,
+users_map[message.from_user.id] == UserStatus.DELETING_TABLE_WAITING,
                      content_types=["text"])
 def deletion_table_number(message):
-
     message_text = message.text
     if not fullmatch("\d+", message_text):
         bot.send_message(message.chat.id, "Отправьте номер нужной таблицы.")
@@ -281,20 +338,20 @@ def deletion_table_number(message):
     table_number = int(message_text)
 
     if table_number > len(deletion_map[message.from_user.id]):
-        bot.send_message(message.chat.id, "Число должно быть в меньше {0}."
+        bot.send_message(message.chat.id, "Число должно быть меньше {0}."
                          .format(str(len(deletion_map[message.from_user.id]))))
         return
 
     tables_api.del_spreadsheet_by_id(deletion_map[message.from_user.id][table_number]["id"])
+    __remove_from_tables_map(message.from_user.id, deletion_map[message.from_user.id][table_number]["id"])
 
     deletion_map.pop(message.from_user.id, None)
-
     users_map[message.from_user.id] = UserStatus.NORMAL_STATE
     bot.send_message(message.chat.id, "Таблица успешно удалена")
 
 
 @bot.message_handler(func=lambda message:
-                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["att"])
 def att_command(message):
     command_args = message.text.split()
@@ -322,7 +379,7 @@ def att_command(message):
 
 
 @bot.message_handler(func=lambda message:
-                     users_map[message.from_user.id] == UserStatus.ATT_STATE,
+users_map[message.from_user.id] == UserStatus.ATT_STATE,
                      content_types=["text"])
 def att_student(message):
     text = message.text
@@ -332,7 +389,7 @@ def att_student(message):
         bot.send_message(message.chat.id, "Используйте - или +")
         bot.send_message(message.chat.id,
                          att_map[message.from_user.id].students[att_map[message.from_user.id].current_index],
-                     parse_mode="html", reply_markup=att_keyboard)
+                         parse_mode="html", reply_markup=att_keyboard)
         return
 
     att_map[message.from_user.id].attendance.append("-" if text == "-" else "'+")
@@ -357,28 +414,25 @@ def echo(message):
     bot.send_message(message.chat.id, message.text)
 
 
-# Returns object from table_map by table_name
-def __get_table_by_name(user_id, table_name):
-    table_object = None
-    for table in tables_map[user_id]:
-        if table["name"] == table_name:
-            table_object = table
-
-    return table_object
+def __remove_from_tables_map(user_id, table_id):
+    for i in range(len(tables_map[user_id])):
+        if table_id == tables_map[user_id][i]["id"]:
+            tables_map[user_id].pop(i)
+            return
 
 
-def __create_table(chat_id, user_id):
+def __create_table(chat_id, creation_params):
     bot.send_message(chat_id, "Загрузка файлов формата таблицы и списка группы.")
 
     # TODO: try-except
-    table_file_info = bot.get_file(creation_map[user_id].table_file)
+    table_file_info = bot.get_file(creation_params.table_file)
 
     table_file = requests.get(
         'https://api.telegram.org/file/bot{0}/{1}'.format(config.TOKEN, table_file_info.file_path))
     table_style = list(filter(None, table_file.content.decode("utf-8").split('\n')))
     table_file.close()
 
-    group_file_info = bot.get_file(creation_map[user_id].group_file)
+    group_file_info = bot.get_file(creation_params.group_file)
     group_file = requests.get(
         'https://api.telegram.org/file/bot{0}/{1}'.format(config.TOKEN, group_file_info.file_path))
     group_list = list(filter(None, group_file.content.decode("utf-8").split('\n')))
@@ -387,11 +441,10 @@ def __create_table(chat_id, user_id):
     bot.send_message(chat_id, "Загрузка файлов успешно завершена.")
 
     # TODO try-except
-    creation_params = creation_map[user_id]
-    url = tables_api.create_spreadsheet(creation_params.table_title, creation_params.table_directory,
-                                        creation_params.group_name, table_style, group_list)
+    created_table = tables_api.create_spreadsheet(creation_params.table_title, creation_params.table_directory,
+                                                  creation_params.group_name, table_style, group_list)
 
-    return url
+    return created_table
 
 
 print(bot.get_me())

@@ -28,12 +28,10 @@ class TableInterface:
 
     # table_style  -- list of table fields
     # group_list -- list of students
-    # Returns new spreadsheet's url
+    # Returns new spreadsheet's link and id
     def create_spreadsheet(self, spreadsheet_title, spreadsheet_folder_title, worksheet_title,
                            table_style, group_list):
-        print("Table_style in create_ssheet", table_style)
         style = gt.TableStyle(table_style)
-        print("style_fields:", style.fields)
         spreadsheet_template = {
             "properties": {
                 "title": spreadsheet_title,
@@ -78,11 +76,15 @@ class TableInterface:
             include_tailing_empty_rows=True)
         main_field.apply_format(gt.CellStyle.main_table_cell)
 
-        return spreadsheet.url
+        return {"link": spreadsheet.url, "id": spreadsheet.id}
 
+    # Returns table's id
     def share_table(self, spreadsheet_id, user_mail, role):
         spreadsheet = self.client.open_by_key(spreadsheet_id)
-        spreadsheet.share()
+        share_role = "reader" if role == "r" else "writer"
+        spreadsheet.share(user_mail, share_role)
+
+        return spreadsheet.id
 
     # Returns all spreadsheets {name, link, id} in folder_name directory
     def get_spreadsheets(self, folder_name: str):
@@ -122,27 +124,6 @@ class TableInterface:
 
         if len(spreadsheets_with_name) > 1:
             return None
-
-    # Deletes spreadsheet_name from folder_name directory
-    # if there is one spreadsheet with spreadsheet_name in folder_name, returns empty list
-    # if there are several spreadsheets with spreadsheet_name then returns them in list {name, link, id}
-    # if spreadsheet_name not found in folder_name, returns None
-    def del_spreadsheet(self, folder_name: str, spreadsheet_name: str):
-        all_spreadsheet_list = self.get_spreadsheets(folder_name)
-
-        if all_spreadsheet_list is None:
-            return None
-
-        spreadsheets_with_name = list(filter(lambda elem: elem["name"] == spreadsheet_name, all_spreadsheet_list))
-
-        if len(spreadsheets_with_name) == 0:
-            return None
-
-        if len(spreadsheets_with_name) == 1:
-            self.client.drive.delete(spreadsheets_with_name[0]["id"])
-            return []
-
-        return spreadsheets_with_name
 
     # Deletes table by spreadsheet_id
     def del_spreadsheet_by_id(self, spreadsheet_id):

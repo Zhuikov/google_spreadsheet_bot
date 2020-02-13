@@ -10,6 +10,7 @@ class Obj:
     def to_string(self):
         return "a = " + str(self.a) + " b = " + str(self.b) + " c = " + str(self.c)
 
+
 def main():
 
     mapa = {}
