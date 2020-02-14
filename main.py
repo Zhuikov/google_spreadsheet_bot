@@ -21,6 +21,8 @@ def main():
     mapa[1].b = 2
 
     pprint(mapa[1].to_string())
+    print(mapa[1].c)
+    print(mapa[234] is None)
     # tables_interface = google_tables.TableInterface("client_secrets.json")
     # tables_interface.add_date_col("219651041", "GoodTable", ["TEST6", "-", "'+", "-", "-", "'+", "'+"])
     # print(tables_interface.get_students_list("219651041", "GoodTable"))

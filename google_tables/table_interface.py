@@ -63,8 +63,7 @@ class TableInterface:
         first_col = spreadsheet.sheet1.get_col(1, returnas='range')
         first_col.apply_format(gt.CellStyle.student_names_format_cell)
 
-        # format table fields
-        # TODO wrap strategy
+        # format table field
         first_row = spreadsheet.sheet1.get_row(1, returnas='range')
         first_row.apply_format(gt.CellStyle.fields_format_cell)
 
@@ -78,13 +77,13 @@ class TableInterface:
 
         return {"link": spreadsheet.url, "id": spreadsheet.id}
 
-    # Returns table's id
+    # Returns table's url
     def share_table(self, spreadsheet_id, user_mail, role):
         spreadsheet = self.client.open_by_key(spreadsheet_id)
         share_role = "reader" if role == "r" else "writer"
         spreadsheet.share(user_mail, share_role)
 
-        return spreadsheet.id
+        return spreadsheet.url
 
     # Returns all spreadsheets {name, link, id} in folder_name directory
     def get_spreadsheets(self, folder_name: str):
@@ -102,69 +101,39 @@ class TableInterface:
         return files_name_id
 
     # Returns list of students first name and second name
-    # Students must be in A column
-    # If there is no folder_name or spreadsheet_name returns None
-    # If there are several spreadsheet_name documents also returns None
-    def get_students_list(self, folder_name, spreadsheet_name):
-        all_spreadsheet_list = self.get_spreadsheets(folder_name)
-
-        if all_spreadsheet_list is None:
-            return None
-
-        spreadsheets_with_name = list(filter(lambda elem: elem["name"] == spreadsheet_name, all_spreadsheet_list))
-
-        if len(spreadsheets_with_name) == 0:
-            return None
-
-        if len(spreadsheets_with_name) == 1:
-            worksheet = self.client.open_by_key(spreadsheets_with_name[0]["id"]).sheet1
-            students_range = worksheet.range("A2:A" + str(worksheet.rows), returnas='cell')
-            students_list = [cell.value for cells in students_range for cell in cells]
-            return students_list
-
-        if len(spreadsheets_with_name) > 1:
-            return None
+    # Students must be in A2:An column
+    def get_students_list(self, folder_name, spreadsheet_id):
+        worksheet = self.client.open_by_key(spreadsheet_id).sheet1
+        students_range = worksheet.range("A2:A" + str(worksheet.rows), returnas='cell')
+        students_list = [cell.value for cells in students_range for cell in cells]
+        return students_list
 
     # Deletes table by spreadsheet_id
     def del_spreadsheet_by_id(self, spreadsheet_id):
         self.client.drive.delete(spreadsheet_id)
 
     # Creates new column with attendance content
-    # content[0] -- col name, content[n] -- attendance of student (+/-)
-    def add_date_col(self, folder_name, spreadsheet_name, content):
-        all_spreadsheet_list = self.get_spreadsheets(folder_name)
+    # content[0] -- col name, content[1:n] -- attendance of student (+/-)
+    def add_date_col(self, spreadsheet_id, content):
 
-        if all_spreadsheet_list is None:
-            return None
+        insert_index = self.__find_date_col_index(spreadsheet_id)
+        print(insert_index)
 
-        spreadsheets_with_name = list(filter(lambda elem: elem["name"] == spreadsheet_name, all_spreadsheet_list))
+        spreadsheet = self.client.open_by_key(spreadsheet_id)
+        spreadsheet.sheet1.insert_cols(insert_index, values=content, inherit=True)
+        spreadsheet.sheet1.adjust_column_width(insert_index)
 
-        if len(spreadsheets_with_name) == 0:
-            return None
+        now = datetime.datetime.now()
+        pprint(spreadsheet.sheet1.cell(addr=(1, insert_index + 1)))
+        added_field_cell = spreadsheet.sheet1.cell((1, insert_index + 1))
+        added_field_cell.note = str(now.day) + "." + str(now.month) + "." + str(now.year)
 
-        if len(spreadsheets_with_name) == 1:
-            spreadsheet_id = spreadsheets_with_name[0]["id"]
-            insert_index = self.__find_date_col_index(spreadsheet_id)
-            print(insert_index)
+        new_col_content = spreadsheet.sheet1.get_values(
+            (2, insert_index + 1), (spreadsheet.sheet1.rows, insert_index + 1), returnas='range',
+            include_tailing_empty_rows=True)
+        new_col_content.apply_format(gt.CellStyle.main_table_cell)
 
-            spreadsheet = self.client.open_by_key(spreadsheet_id)
-            spreadsheet.sheet1.insert_cols(insert_index, values=content, inherit=True)
-            spreadsheet.sheet1.adjust_column_width(insert_index)
-
-            now = datetime.datetime.now()
-            pprint(spreadsheet.sheet1.cell(addr=(1, insert_index + 1)))
-            added_field_cell = spreadsheet.sheet1.cell((1, insert_index + 1))
-            added_field_cell.note = str(now.day) + "." + str(now.month) + "." + str(now.year)
-
-            new_col_content = spreadsheet.sheet1.get_values(
-                (2, insert_index + 1), (spreadsheet.sheet1.rows, insert_index + 1), returnas='range',
-                include_tailing_empty_rows=True)
-            new_col_content.apply_format(gt.CellStyle.main_table_cell)
-
-            return True
-
-        if len(spreadsheets_with_name) > 1:
-            return False
+        return True
 
     # Returns folder's id if directory consists.
     # Else returns None

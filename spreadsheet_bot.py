@@ -55,8 +55,8 @@ class SharingParams:
 
 
 class AttendanceLists:
-    def __init__(self, students, spreadsheet_name):
-        self.spreadsheet_name = spreadsheet_name
+    def __init__(self, students, spreadsheet_id):
+        self.spreadsheet_id = spreadsheet_id
         self.current_index = 0
         self.students = students
         self.attendance = []
@@ -77,7 +77,7 @@ bot = telebot.TeleBot(config.TOKEN)
 def help_command(message):
     text = "Команды:\n\n" \
            "/create title -- создать документ Google spreadsheet.\n" \
-           " - title -- заголовок документа (без пробелов).\n\n" \
+           " - title -- заголовок документа (без пробелов).\n" \
            "После отправки команды необходимо выслать файл с форматом таблицы; затем -- файл со списком группы. " \
            "Название файла группы должно соответствовать ее номеру (\"NUM[_NUM][.txt]\").\n" \
            "После успешного создания таблицы бот присылает адрес таблицы на сервисе Google Spreadsheets.\n\n" \
@@ -85,6 +85,7 @@ def help_command(message):
            " - e-mail -- пользователь, которому необходимо предоставить доступ к созданной таблице,\n" \
            " - role -- права доступа R или W (r или w), где R -- доступ только для чтения, " \
            "W -- доступ для редактирования.\n" \
+           "В случае нескольких таблиц с одинаковым названием предоставляется выбор нужной таблицы." \
            "После успешной выдачи прав бот присылает адрес таблицы.\n\n" \
            "/get -- вывести список созданных пользователем таблиц.\n\n" \
            "/delete title -- удалить таблицу с указанным названием title.\n" \
@@ -92,9 +93,9 @@ def help_command(message):
            "/att table col -- начать выставление посещаемости студентов.\n" \
            " - table -- заголовок документа таблицы,\n" \
            " - col -- заголовок создаваемого столбца в таблице table.\n" \
-           "В результате успешного выполнения команды в таблице создается дополнительный столбец с проставленной" \
+           "В результате успешного выполнения команды в таблице создается дополнительный столбец с проставленной " \
            "посещаемостью студентов. В заметку столбца добавляется текущая дата.\n\n" \
-           "/stop -- отменяет текущую операцию создания, удаления таблицы или процесс выставления посещаемости."
+           "/stop -- отменяет текущую операцию создания или удаления таблицы или процесс выставления посещаемости."
     bot.send_message(message.chat.id, text)
 
 
@@ -121,7 +122,13 @@ def create_command(message):
 
 
 @bot.message_handler(func=lambda message:
-users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     users_map.get(message.from_user.id, None) is None)
+def not_started_user(message):
+    bot.send_message(message.chat.id, "Введите /start для начала работы")
+
+
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["create"])
 def create_command(message):
     command_args = message.text.split()
@@ -139,9 +146,9 @@ def create_command(message):
 
 
 @bot.message_handler(func=lambda message:
-message.document is not None and
-message.document.mime_type == 'text/plain' and
-users_map[message.from_user.id] == UserStatus.WAIT_TABLE_FORMAT,
+                     message.document is not None and
+                     message.document.mime_type == 'text/plain' and
+                     users_map[message.from_user.id] == UserStatus.WAIT_TABLE_FORMAT,
                      content_types=['document'])
 def handle_table_format_file(message):
     creation_map[message.from_user.id].table_file = message.document.file_id
@@ -173,8 +180,9 @@ def handle_group_format_file(message):
     except Exception:
         bot.send_message(message.chat.id, "Ошибка при создании таблицы")
         return
+    finally:
+        creation_map.pop(message.from_user.id, None)
 
-    creation_map.pop(message.from_user.id, None)
     tables_map[message.from_user.id].append({"id": created_table["id"],
                                              "name": creation_params.table_title,
                                              "link": created_table["link"]})
@@ -184,7 +192,6 @@ def handle_group_format_file(message):
 
 
 @bot.message_handler(func=lambda message:
-                     users_map[message.from_user.id] is not None and
                      users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["share"])
 def share_command(message):
@@ -248,7 +255,8 @@ def deletion_table_number(message):
                          .format(str(len(deletion_map[message.from_user.id]))))
         return
 
-    url = tables_api.share_table(sharing_map[message.from_user.id].tables[table_number],
+    pprint(sharing_map[message.from_user.id].tables)
+    url = tables_api.share_table(sharing_map[message.from_user.id].tables[table_number]["id"],
                                  sharing_map[message.from_user.id].user_mail,
                                  sharing_map[message.from_user.id].role)
 
@@ -289,8 +297,7 @@ def stop_command(message):
 
 
 @bot.message_handler(func=lambda message:
-users_map[message.from_user.id] is not None and
-users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["delete"])
 def delete_command(message):
     command_args = message.text.split()
@@ -327,7 +334,7 @@ def delete_command(message):
 
 
 @bot.message_handler(func=lambda message:
-users_map[message.from_user.id] == UserStatus.DELETING_TABLE_WAITING,
+                     users_map[message.from_user.id] == UserStatus.DELETING_TABLE_WAITING,
                      content_types=["text"])
 def deletion_table_number(message):
     message_text = message.text
@@ -351,7 +358,7 @@ def deletion_table_number(message):
 
 
 @bot.message_handler(func=lambda message:
-users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
+                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["att"])
 def att_command(message):
     command_args = message.text.split()
@@ -359,32 +366,33 @@ def att_command(message):
     if len(command_args) != 3:
         bot.send_message(message.chat.id, "Неверный формат команды, см. /help")
         return
+    # command_args = ['/att', table_name, new_col_name)
 
-    students_list = tables_api.get_students_list(message.from_user.id, command_args[1])
+    att_table = list(filter(lambda x: x["name"] == command_args[1], tables_map[message.from_user.id]))
 
-    if students_list is None:
+    if not att_table:
         bot.send_message(message.chat.id, "Таблица не найдена")
         return
 
-    if not students_list:
-        bot.send_message(message.chat.id, "Список студентов пуст")
-        return
+    if len(att_table) == 1:
+        students_list = tables_api.get_students_list(message.from_user.id, att_table[0]["id"])
+        if not students_list:
+            bot.send_message(message.chat.id, "Список студентов пуст")
+            return
+        att_map[message.from_user.id] = AttendanceLists(students_list, att_table[0]["id"])
+        att_map[message.from_user.id].attendance.append(command_args[2])
+        users_map[message.from_user.id] = UserStatus.ATT_STATE
 
-    att_map[message.from_user.id] = AttendanceLists(students_list, command_args[1])
-    att_map[message.from_user.id].attendance.append(command_args[2])
-    users_map[message.from_user.id] = UserStatus.ATT_STATE
-
-    bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
-                     parse_mode="html", reply_markup=att_keyboard)
+        bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
+                         parse_mode="html", reply_markup=att_keyboard)
 
 
 @bot.message_handler(func=lambda message:
-users_map[message.from_user.id] == UserStatus.ATT_STATE,
+                     users_map[message.from_user.id] == UserStatus.ATT_STATE,
                      content_types=["text"])
 def att_student(message):
     text = message.text
 
-    print(text)
     if text != "+" and text != "-":
         bot.send_message(message.chat.id, "Используйте - или +")
         bot.send_message(message.chat.id,
@@ -400,13 +408,13 @@ def att_student(message):
                          att_map[message.from_user.id].students[att_map[message.from_user.id].current_index],
                          parse_mode="html", reply_markup=att_keyboard)
     else:
-        bot.send_message(message.chat.id, "Выставление посещаемости...")
-        tables_api.add_date_col(message.from_user.id, att_map[message.from_user.id].spreadsheet_name,
+        bot.send_message(message.chat.id, "Выставление посещаемости...",
+                         reply_markup=telebot.types.ReplyKeyboardRemove())
+        tables_api.add_date_col(att_map[message.from_user.id].spreadsheet_id,
                                 att_map[message.from_user.id].attendance)
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         att_map.pop(message.from_user.id, None)
-        bot.send_message(message.chat.id, "Посещаемость успешно выставлена",
-                         reply_markup=telebot.types.ReplyKeyboardRemove())
+        bot.send_message(message.chat.id, "Посещаемость успешно выставлена")
 
 
 @bot.message_handler(content_types=["text"])
