@@ -102,14 +102,14 @@ class TableInterface:
 
     # Returns list of students first name and second name
     # Students must be in A2:An column
-    def get_students_list(self, folder_name, spreadsheet_id):
+    def get_students_list(self, spreadsheet_id):
         worksheet = self.client.open_by_key(spreadsheet_id).sheet1
         students_range = worksheet.range("A2:A" + str(worksheet.rows), returnas='cell')
         students_list = [cell.value for cells in students_range for cell in cells]
         return students_list
 
     # Deletes table by spreadsheet_id
-    def del_spreadsheet_by_id(self, spreadsheet_id):
+    def del_spreadsheet(self, spreadsheet_id):
         self.client.drive.delete(spreadsheet_id)
 
     # Creates new column with attendance content

@@ -35,6 +35,7 @@ class UserStatus(Enum):
     SHARING_TABLE = 7
     SHARING_TABLE_WAITING = 8
     ATT_STATE = 9
+    ATT_STATE_TABLE_WAITING = 10
 
 
 class CreationParams:
@@ -55,11 +56,13 @@ class SharingParams:
 
 
 class AttendanceLists:
-    def __init__(self, students, spreadsheet_id):
+    # tables -- list of tables with equal name
+    def __init__(self, students, spreadsheet_id, tables=None):
         self.spreadsheet_id = spreadsheet_id
         self.current_index = 0
         self.students = students
         self.attendance = []
+        self.tables = tables
 
 
 att_keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -111,6 +114,8 @@ def __maps(message):
     pprint(deletion_map)
     print("att_map")
     pprint(att_map)
+    print("sharing_map")
+    pprint(sharing_map)
 
 
 @bot.message_handler(commands=["start"])
@@ -237,17 +242,10 @@ def share_command(message):
 @bot.message_handler(func=lambda message:
                      users_map[message.from_user.id] == UserStatus.SHARING_TABLE_WAITING,
                      content_types=["text"])
-def deletion_table_number(message):
-    message_text = message.text
-    if not fullmatch("\d+", message_text):
-        bot.send_message(message.chat.id, "Отправьте номер нужной таблицы.")
-        return
+def sharing_table_number(message):
 
-    table_number = int(message_text)
-
-    if table_number > len(sharing_map[message.from_user.id].tables):
-        bot.send_message(message.chat.id, "Число должно быть меньше {0}."
-                         .format(str(len(deletion_map[message.from_user.id]))))
+    table_number = __check_table_number(message.chat.id, message.text, len(sharing_map[message.from_user.id].tables))
+    if table_number is None:
         return
 
     pprint(sharing_map[message.from_user.id].tables)
@@ -264,6 +262,7 @@ def deletion_table_number(message):
                      users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["get"])
 def get_command(message):
+
     if not tables_map[message.from_user.id]:
         bot.send_message(message.chat.id, "У вас пока нет таблиц")
         return
@@ -277,6 +276,7 @@ def get_command(message):
 
 @bot.message_handler(commands=["stop"])
 def stop_command(message):
+
     if creation_map.pop(message.from_user.id, None) is not None:
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         bot.send_message(message.chat.id, "Отмена создания таблицы")
@@ -295,6 +295,7 @@ def stop_command(message):
                      users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
                      commands=["delete"])
 def delete_command(message):
+
     command_args = message.text.split()
     # command_args = ['/delete', table_name]
 
@@ -311,7 +312,7 @@ def delete_command(message):
 
     if len(deleting_table) == 1:
         users_map[message.from_user.id] = UserStatus.DELETING_TABLE
-        tables_api.del_spreadsheet_by_id(deleting_table[0]["id"])
+        tables_api.del_spreadsheet(deleting_table[0]["id"])
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
         __remove_from_tables_map(message.from_user.id, deleting_table[0]["id"])
         bot.send_message(message.chat.id, "Таблица успешно удалена")
@@ -327,19 +328,12 @@ def delete_command(message):
                      users_map[message.from_user.id] == UserStatus.DELETING_TABLE_WAITING,
                      content_types=["text"])
 def deletion_table_number(message):
-    message_text = message.text
-    if not fullmatch("\d+", message_text):
-        bot.send_message(message.chat.id, "Отправьте номер нужной таблицы.")
+
+    table_number = __check_table_number(message.chat.id, message.text, len(deletion_map[message.from_user.id]))
+    if table_number is None:
         return
 
-    table_number = int(message_text)
-
-    if table_number >= len(deletion_map[message.from_user.id]):
-        bot.send_message(message.chat.id, "Число должно быть меньше {0}."
-                         .format(str(len(deletion_map[message.from_user.id]))))
-        return
-
-    tables_api.del_spreadsheet_by_id(deletion_map[message.from_user.id][table_number]["id"])
+    tables_api.del_spreadsheet(deletion_map[message.from_user.id][table_number]["id"])
     __remove_from_tables_map(message.from_user.id, deletion_map[message.from_user.id][table_number]["id"])
 
     deletion_map.pop(message.from_user.id, None)
@@ -365,7 +359,7 @@ def att_command(message):
         return
 
     if len(att_table) == 1:
-        students_list = tables_api.get_students_list(message.from_user.id, att_table[0]["id"])
+        students_list = tables_api.get_students_list(att_table[0]["id"])
         if not students_list:
             bot.send_message(message.chat.id, "Список студентов пуст")
             return
@@ -374,6 +368,36 @@ def att_command(message):
         users_map[message.from_user.id] = UserStatus.ATT_STATE
 
         bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
+                         parse_mode="html", reply_markup=att_keyboard)
+        return
+
+    # Many tables with equal names
+    users_map[message.from_user.id] = UserStatus.ATT_STATE_TABLE_WAITING
+    att_map[message.from_user.id] = AttendanceLists(None, None, att_table)
+    att_map[message.from_user.id].attendance.append(command_args[2])
+    __provide_choice(command_args[1], att_table, message.chat.id)
+
+
+@bot.message_handler(func=lambda message:
+                     users_map[message.from_user.id] == UserStatus.ATT_STATE_TABLE_WAITING,
+                     content_types=["text"])
+def att_table_number(message):
+
+    table_number = __check_table_number(message.chat.id, message.text, len(att_map[message.from_user.id].tables))
+    if table_number is None:
+        return
+
+    chosen_table = att_map[message.from_user.id].tables[table_number]
+    students_list = tables_api.get_students_list(chosen_table["id"])
+    if not students_list:
+        bot.send_message(message.chat.id, "Список студентов пуст")
+        users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+        return
+    att_map[message.from_user.id].students = students_list
+    att_map[message.from_user.id].spreadsheet_id = chosen_table["id"]
+    users_map[message.from_user.id] = UserStatus.ATT_STATE
+
+    bot.send_message(message.chat.id, att_map[message.from_user.id].students[0],
                          parse_mode="html", reply_markup=att_keyboard)
 
 
@@ -419,6 +443,22 @@ def __provide_choice(table_name, table_list, chat_id):
         table_list_message += line
     bot.send_message(chat_id, "Выберите номер таблицы")
     bot.send_message(chat_id, table_list_message)
+
+
+# Checks user's message format
+# Returns table index if success. Otherwise returns None
+def __check_table_number(chat_id, message_text, max_index):
+    if not fullmatch("\d+", message_text):
+        bot.send_message(chat_id, "Отправьте номер нужной таблицы.")
+        return None
+
+    table_number = int(message_text)
+
+    if table_number >= max_index:
+        bot.send_message(chat_id, "Число должно быть меньше " + str(max_index))
+        return None
+
+    return table_number
 
 
 def __remove_from_tables_map(user_id, table_id):
