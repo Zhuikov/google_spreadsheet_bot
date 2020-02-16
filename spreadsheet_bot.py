@@ -17,7 +17,7 @@ tables_api = TableInterface("botsCreds.json")
 users_map = {}  # { user_id: UserStatus }
 tables_map = {}  # { user_id: {id, name, link} }
 
-"""Maps used in user's complex operations"""
+"""Maps used in complex operations"""
 
 creation_map = {}  # { user_id: CreationParams }
 deletion_map = {}  # { user_id: *list of tables with equals name* }
@@ -168,8 +168,8 @@ def handle_group_format_file(message):
         bot.send_message(message.chat.id, "Неверный формат названия файла. Переименуйте файл и отправьте заново.")
         return
 
+    creation_map[message.from_user.id].group_name = file_name
     creation_map[message.from_user.id].group_file = message.document.file_id
-    creation_map[message.from_user.id].file_name = message.document.file_name
 
     users_map[message.from_user.id] = UserStatus.CREATING_TABLE
 
@@ -231,12 +231,7 @@ def share_command(message):
     # Many tables with equal name
     sharing_map[message.from_user.id] = SharingParams(share_tables, command_args[2], command_args[3])
     users_map[message.from_user.id] = UserStatus.SHARING_TABLE_WAITING
-    table_list = command_args[1] + ":"
-    for i in range(len(share_tables)):
-        current_line = "\n" + str(i) + ". " + share_tables[i]["link"]
-        table_list += current_line
-    bot.send_message(message.chat.id, "Выберите номер таблицы для выдачи прав")
-    bot.send_message(message.chat.id, table_list)
+    __provide_choice(command_args[1], share_tables, message.chat.id)
 
 
 @bot.message_handler(func=lambda message:
@@ -325,12 +320,7 @@ def delete_command(message):
     # Many tables with equal names
     deletion_map[message.from_user.id] = deleting_table
     users_map[message.from_user.id] = UserStatus.DELETING_TABLE_WAITING
-    table_list = command_args[1] + ":"
-    for i in range(len(deleting_table)):
-        current_line = "\n" + str(i) + ". " + deleting_table[i]["link"]
-        table_list += current_line
-    bot.send_message(message.chat.id, "Выберите номер таблицы для удаления")
-    bot.send_message(message.chat.id, table_list)
+    __provide_choice(command_args[1], deleting_table, message.chat.id)
 
 
 @bot.message_handler(func=lambda message:
@@ -344,7 +334,7 @@ def deletion_table_number(message):
 
     table_number = int(message_text)
 
-    if table_number > len(deletion_map[message.from_user.id]):
+    if table_number >= len(deletion_map[message.from_user.id]):
         bot.send_message(message.chat.id, "Число должно быть меньше {0}."
                          .format(str(len(deletion_map[message.from_user.id]))))
         return
@@ -420,6 +410,15 @@ def att_student(message):
 @bot.message_handler(content_types=["text"])
 def echo(message):
     bot.send_message(message.chat.id, message.text)
+
+
+def __provide_choice(table_name, table_list, chat_id):
+    table_list_message = table_name + ":"
+    for i in range(len(table_list)):
+        line = "\n" + str(i) + ". " + table_list[i]["link"]
+        table_list_message += line
+    bot.send_message(chat_id, "Выберите номер таблицы")
+    bot.send_message(chat_id, table_list_message)
 
 
 def __remove_from_tables_map(user_id, table_id):
