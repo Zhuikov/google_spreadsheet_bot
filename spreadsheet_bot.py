@@ -439,7 +439,7 @@ def att_command(message):
     # Many tables with equal names
     users_map[message.from_user.id] = UserStatus.ATT_STATE_TABLE_WAITING
     att_map[message.from_user.id] = AttendanceLists(None, None, command_args[2], att_table)
-    att_map[message.from_user.id].attendance.append(command_args[2])
+    att_map[message.from_user.id].attendance.append(command_args[3])
     __provide_choice(command_args[1], att_table, message.chat.id)
 
 
