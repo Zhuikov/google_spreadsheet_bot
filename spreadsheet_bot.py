@@ -1,6 +1,7 @@
 import telebot
 import requests
 from telebot import types
+from telebot import apihelper
 from re import fullmatch
 from enum import Enum
 from google_tables import TableInterface
@@ -29,23 +30,26 @@ class UserStatus(Enum):
     NORMAL_STATE = 1
     WAIT_TABLE_FORMAT = 2
     WAIT_GROUP_LIST = 3
-    CREATING_TABLE = 4
-    DELETING_TABLE = 5
-    DELETING_TABLE_WAITING = 6
-    SHARING_TABLE = 7
-    SHARING_TABLE_WAITING = 8
-    ATT_STATE = 9
-    ATT_STATE_TABLE_WAITING = 10
+    CREATING = 4
+    CREATING_WORKSHEET_WAITING = 5
+    DELETING_TABLE = 6
+    DELETING_TABLE_WAITING = 7
+    SHARING_TABLE = 8
+    SHARING_TABLE_WAITING = 9
+    ATT_STATE = 10
+    ATT_STATE_TABLE_WAITING = 11
 
 
 class CreationParams:
     def __init__(self):
         self.table_title = None
+        self.table_id = None
         self.table_directory = None
         self.group_file = None
         self.table_file = None
         self.worksheet_name = None
         self.creating_table = True
+        self.tables = None
 
 
 class SharingParams:
@@ -74,6 +78,8 @@ att_keyboard.add(button1, button2)
 
 # TODO: read old users from file
 """Bot's code"""
+
+# apihelper.proxy = {'https':'socks5://219651041:6dJd7vsh@orbtl.s5.opennetwork.cc:999'}
 
 bot = telebot.TeleBot(config.TOKEN)
 
@@ -141,16 +147,37 @@ def not_started_user(message):
 
 @bot.message_handler(func=lambda message:
                      users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
-                     commands=["create"])
+                     commands=["create", "createw"])
 def create_command(message):
     command_args = message.text.split()
+    # command_args = [ '/create(w)', table_title ]
+
     if len(command_args) != 2:
         bot.send_message(message.chat.id, "Неверный формат команды. (см. /help)")
         return
 
     creation_params = CreationParams()
-    creation_params.table_directory = message.from_user.id
-    creation_params.table_title = command_args[1]
+
+    if command_args[0] == "/createw":
+        tables_with_name = list(filter(lambda x: x["name"] == command_args[1], tables_map[message.from_user.id]))
+        if not tables_with_name:
+            bot.send_message(message.chat.id, "Таблица " + command_args[1] + " не найдена")
+            return
+
+        creation_params.creating_table = False
+
+        if len(tables_with_name) > 1:
+            creation_params.tables = tables_with_name
+            creation_map[message.from_user.id] = creation_params
+            __provide_choice(command_args[1], tables_with_name, message.chat.id)
+            users_map[message.from_user.id] = UserStatus.CREATING_WORKSHEET_WAITING
+            return
+
+        creation_params.table_id = tables_with_name[0]["id"]
+    else:
+        creation_params.table_directory = message.from_user.id
+        creation_params.table_title = command_args[1]
+
     creation_map[message.from_user.id] = creation_params
 
     users_map[message.from_user.id] = UserStatus.WAIT_TABLE_FORMAT
@@ -158,29 +185,15 @@ def create_command(message):
 
 
 @bot.message_handler(func=lambda message:
-                     users_map[message.from_user.id] == UserStatus.NORMAL_STATE,
-                     commands=["createw"])
-def create_worksheet_command(message):
-
-    command_args = message.text.split()
-    if len(command_args) != 2:
-        bot.send_message(message.chat.id, "Неверное количество аргументов. См /help")
-        return
-    # command_args = ['/createw', table_name]
-
-    tables_with_name = list(filter(lambda x: x["name"] == command_args[1], tables_map[message.from_user.id]))
-    if not tables_with_name:
-        bot.send_message(message.chat.id, "Таблица " + command_args[1] + " не найдена")
+                    users_map[message.from_user.id] == UserStatus.CREATING_WORKSHEET_WAITING,
+                     content_types=["text"])
+def create_worksheet_waiting(message):
+    table_number = __check_table_number(message.chat.id, message.text, len(creation_map[message.from_user.id].tables))
+    if table_number is None:
         return
 
-    if len(tables_with_name) > 1:
-        bot.send_message(message.chat.id, "Таблиц с указанным именем несколько. Данный режим не поддерживается  =(")
-        return
-
-    creation_params = CreationParams()
-    creation_params.table_title = command_args[1]
-    creation_params.creating_table = False
-    creation_map[message.from_user.id] = creation_params
+    chosen_table = creation_map[message.from_user.id].tables[table_number]
+    creation_map[message.from_user.id].table_id = chosen_table["id"]
 
     users_map[message.from_user.id] = UserStatus.WAIT_TABLE_FORMAT
     bot.send_message(message.chat.id, "Отправьте файл с форматом таблицы")
@@ -213,15 +226,14 @@ def handle_group_format_file(message):
     creation_map[message.from_user.id].worksheet_name = file_name
     creation_map[message.from_user.id].group_file = message.document.file_id
 
-    users_map[message.from_user.id] = UserStatus.CREATING_TABLE
+    users_map[message.from_user.id] = UserStatus.CREATING
 
     creation_params = creation_map[message.from_user.id]
 
-    tables_with_name = list(filter(lambda x: x["name"] == creation_params.table_title,
-                                   tables_map[message.from_user.id]))
+    target_table = list(filter(lambda x: x["id"] == creation_params.table_id, tables_map[message.from_user.id]))
 
     if not creation_params.creating_table:
-        if creation_params.worksheet_name in tables_with_name[0]["worksheets"]:
+        if creation_params.worksheet_name in target_table[0]["worksheets"]:
             bot.send_message(message.chat.id, "Лист с таким именем уже существует в таблице")
 
             users_map[message.from_user.id] = UserStatus.NORMAL_STATE
@@ -235,20 +247,16 @@ def handle_group_format_file(message):
     #                      "Ошибка при создании нового листа таблицы")
     #     return
     # finally:
-    #     creation_map.pop(message.from_user.id, None)
+    creation_map.pop(message.from_user.id, None)
 
     if creation_params.creating_table:
         tables_map[message.from_user.id].append({"id": created["id"],
-                                             "name": creation_params.table_title,
-                                             "link": created["link"],
-                                             "worksheets": created["worksheets"]})
+                                                 "name": creation_params.table_title,
+                                                 "link": created["link"],
+                                                 "worksheets": created["worksheets"]})
     else:
-        index = -1
-        for i in range(len(tables_map[message.from_user.id])):
-            if tables_map[message.from_user.id][i]["name"] == creation_params.table_title:
-                index = i
-                break
-        tables_map[message.from_user.id][index]["worksheets"].append(creation_params.worksheet_name)
+        target_table = list(filter(lambda x: x["id"] == creation_params.table_id, tables_map[message.from_user.id]))
+        target_table[0]["worksheets"].append(creation_params.worksheet_name)
 
     users_map[message.from_user.id] = UserStatus.NORMAL_STATE
     bot.send_message(message.chat.id, "Таблица успешно создана.\n" + created["link"] if creation_params.creating_table
@@ -454,8 +462,9 @@ def att_table_number(message):
 
     if att_map[message.from_user.id].worksheet_name not in \
             att_map[message.from_user.id].tables[table_number]["worksheets"]:
-        bot.send_message(message.chat.id, "Лист не найден. Действие отменено")
+        att_map.pop(message.from_user.id, None)
         users_map[message.from_user.id] = UserStatus.NORMAL_STATE
+        bot.send_message(message.chat.id, "Лист не найден. Действие отменено")
         return
 
     chosen_table = att_map[message.from_user.id].tables[table_number]
@@ -541,7 +550,7 @@ def __remove_from_tables_map(user_id, table_id):
 
 
 def __create(message, creation_params):
-    bot.send_message(message.chat.id, "Загрузка файлов формата таблицы и списка группы.")
+    bot.send_message(message.chat.id, "Загрузка файлов формата таблицы и списка группы...")
 
     # TODO: try-except
     table_file_info = bot.get_file(creation_params.table_file)
@@ -563,10 +572,7 @@ def __create(message, creation_params):
         created_table = tables_api.create_spreadsheet(creation_params.table_title, creation_params.table_directory,
                                                       creation_params.worksheet_name, table_style, group_list)
     else:
-        target_table = list(filter(lambda x: x["name"] == creation_params.table_title,
-                                   tables_map[message.from_user.id]))
-        pprint(target_table)
-        created_table = tables_api.add_worksheet(target_table[0]["id"], creation_params.worksheet_name,
+        created_table = tables_api.add_worksheet(creation_params.table_id, creation_params.worksheet_name,
                                                  table_style, group_list)
 
     return created_table

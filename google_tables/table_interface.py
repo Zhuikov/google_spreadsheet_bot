@@ -131,7 +131,7 @@ class TableInterface:
     # content[0] -- col name, content[1:n] -- attendance of student (+/-)
     def add_date_col(self, spreadsheet_id, worksheet_name, content):
 
-        insert_index = self.__find_date_col_index(spreadsheet_id)
+        insert_index = self.__find_date_col_index(spreadsheet_id, worksheet_name)
         print(insert_index)
 
         worksheet = self.client.open_by_key(spreadsheet_id).worksheet("title", worksheet_name)
@@ -177,8 +177,8 @@ class TableInterface:
         spreadsheet = self.client.open_by_key(spreadsheet_id)
         return [o.title for o in spreadsheet.worksheets()]
 
-    def __find_date_col_index(self, spreadsheet_id):
-        worksheet = self.client.open_by_key(spreadsheet_id).sheet1
+    def __find_date_col_index(self, spreadsheet_id, worksheet_title):
+        worksheet = self.client.open_by_key(spreadsheet_id).worksheet("title", worksheet_title)
         fields = worksheet.get_row(1, returnas='cell')
 
         index = None
